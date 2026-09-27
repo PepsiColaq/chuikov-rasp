@@ -57,6 +57,17 @@ function dateForWeekday(dayNum) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+/** Show dates as ДД.ММ.ГГГГ (storage stays YYYY-MM-DD). */
+function formatDateRu(iso) {
+  if (!iso) return ''
+  const s = String(iso).slice(0, 10)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (m) return `${m[3]}.${m[2]}.${m[1]}`
+  const m2 = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s)
+  if (m2) return s
+  return s
+}
+
 function canEdit(groupId) {
   const s = getSession()
   if (!s) return false
@@ -256,7 +267,7 @@ function renderLessonCard(lesson, dateStr, groupId) {
                   {},
                   hwList.map((h) =>
                     el('div', { style: 'margin-bottom:8px' }, [
-                      el('strong', { text: h.dueDate ? `на ${h.dueDate}: ` : '' }),
+                      el('strong', { text: h.dueDate ? `на ${formatDateRu(h.dueDate)}: ` : '' }),
                       textNode(h.text),
                       canEdit(groupId)
                         ? el('button', {
@@ -296,7 +307,7 @@ function renderSchedule() {
   const frag = el('div', { className: 'panel' }, [
     el('p', {
       className: 'muted',
-      text: `${DAY_NAMES[state.day] || ''} · ${dateStr}`,
+      text: `${DAY_NAMES[state.day] || ''} · ${formatDateRu(dateStr)}`,
     }),
   ])
 
@@ -336,7 +347,7 @@ function renderHwTab() {
     panel.append(
       el('div', { className: 'card' }, [
         el('h3', { text: h.subject }),
-        el('p', { className: 'muted', text: h.dueDate ? `на ${h.dueDate}` : '' }),
+        el('p', { className: 'muted', text: h.dueDate ? `на ${formatDateRu(h.dueDate)}` : '' }),
         el('p', { text: h.text }),
       ]),
     )
@@ -425,7 +436,7 @@ function renderOverridesTab(group) {
           el('h3', { text: typeLabel(o.type) }),
           el('p', {
             className: 'muted',
-            text: `${o.date} · ${lesson ? lesson.subject : 'пара'} · ${lesson ? lesson.start : ''}`,
+            text: `${formatDateRu(o.date)} · ${lesson ? lesson.subject : 'пара'} · ${lesson ? lesson.start : ''}`,
           }),
           o.newSubject ? el('p', { text: `Новый предмет: ${o.newSubject}` }) : null,
           o.newRoom ? el('p', { text: `Кабинет: ${o.newRoom}` }) : null,
@@ -568,7 +579,7 @@ function renderAdminPanel() {
     box.append(
       el('div', {
         className: 'audit-line',
-        text: `${a.at.slice(0, 19)} · ${a.action} · ${a.groupId || '—'} · ${a.detail || ''}`,
+        text: `${formatDateRu(a.at)} ${String(a.at).slice(11, 16)} · ${a.action} · ${a.groupId || '—'} · ${a.detail || ''}`,
       }),
     )
   }
