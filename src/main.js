@@ -23,6 +23,7 @@ import {
   getSemesterLabel,
   getDb,
   getDefaultGroupId,
+  isRemoteMode,
 } from './lib/store.js'
 
 const SELECTED_GROUP_KEY = 'rasp_selected_group_v2'
@@ -101,8 +102,8 @@ function renderTop(group) {
           className: 'session-pill',
           type: 'button',
           text: session.role === 'admin' ? 'Админ · выйти' : 'Староста · выйти',
-          onClick: () => {
-            logout()
+          onClick: async () => {
+            await logout()
             flash('Вы вышли')
           },
         })
@@ -185,10 +186,10 @@ function renderAddHwInline(groupId, lesson) {
     el('div', { className: 'field' }, [el('label', { text: 'Домашнее задание' }), ta]),
     el('button', { className: 'btn', type: 'submit', text: 'Добавить ДЗ' }),
   )
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault()
     try {
-      addHomework(groupId, {
+      await addHomework(groupId, {
         subject: lesson.subject,
         text: ta.value,
         dueDate: due.value,
@@ -260,10 +261,10 @@ function renderLessonCard(lesson, dateStr, groupId) {
                             className: 'muted',
                             style: 'display:block;margin-top:4px',
                             text: 'Удалить',
-                            onClick: (e) => {
+                            onClick: async (e) => {
                               e.stopPropagation()
                               try {
-                                deleteHomework(groupId, h.id)
+                                await deleteHomework(groupId, h.id)
                                 flash('ДЗ удалено')
                               } catch (err) {
                                 flash(err.message, true)
@@ -374,10 +375,10 @@ function renderOverrideForm(groupId) {
     el('button', { className: 'btn', type: 'submit', text: 'Сохранить замену' }),
   )
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault()
     try {
-      setOverride(groupId, {
+      await setOverride(groupId, {
         date: date.value,
         lessonId: lessonSel.value,
         type: typeSel.value,
@@ -430,9 +431,9 @@ function renderOverridesTab(group) {
                 type: 'button',
                 className: 'btn secondary',
                 text: 'Снять замену',
-                onClick: () => {
+                onClick: async () => {
                   try {
-                    clearOverride(group.id, o.id)
+                    await clearOverride(group.id, o.id)
                     flash('Замена снята')
                   } catch (err) {
                     flash(err.message, true)
@@ -547,10 +548,10 @@ function renderAdminPanel() {
         type: 'button',
         className: 'btn danger',
         text: 'Сбросить расписание группы',
-        onClick: () => {
+        onClick: async () => {
           if (!confirm('Точно сбросить расписание этой группы?')) return
           try {
-            resetSemester(semGroup.value)
+            await resetSemester(semGroup.value)
             flash('Семестр сброшен')
           } catch (err) {
             flash(err.message, true)
@@ -635,8 +636,8 @@ function renderMore() {
           type: 'button',
           className: 'btn secondary',
           text: 'Выйти',
-          onClick: () => {
-            logout()
+          onClick: async () => {
+            await logout()
             flash('Вы вышли')
           },
         }),
@@ -649,7 +650,9 @@ function renderMore() {
   panel.append(
     el('p', {
       className: 'footer-note',
-      text: 'Неофициальный студенческий ресурс. Не является сайтом колледжа.',
+      text: isRemoteMode()
+        ? 'Общая база включена — ДЗ и замены видны всем. Неофициальный студенческий ресурс.'
+        : 'Неофициальный студенческий ресурс. Сейчас локальный режим (без общей синхронизации).',
     }),
   )
   return panel

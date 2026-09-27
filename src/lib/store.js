@@ -14,39 +14,44 @@ import {
   SCHEDULE_LESSONS,
   facultyFromName,
 } from '../data/seed.js'
+import { supabase, supabaseConfigured, rpcErrorMessage } from './supabase.js'
 
-const STORAGE_KEY = 'rasp_db_v3'
-const DB_VERSION = 3
-const SESSION_KEY = 'rasp_session_v1'
+const STORAGE_KEY = 'rasp_db_v4'
+const DB_VERSION = 4
+const SESSION_KEY = 'rasp_session_v2'
 const CODE_SALT = 'chuikov-rasp-v1'
 
 function uid(prefix = 'id') {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`
 }
 
-function groupIdFromName(name) {
+export function groupIdFromName(name) {
   return `g_${name.replace(/[^a-zA-Z0-9а-яА-ЯёЁ]+/gi, '_').toLowerCase()}`
 }
 
-async function buildSeed() {
+function lessonId(groupId, l, i) {
+  const sub = String(l.subject || '')
+    .replace(/[^a-zA-Z0-9а-яА-ЯёЁ]+/gi, '_')
+    .slice(0, 40)
+  return `${groupId}_${l.day}_${String(l.start).replace(':', '')}_${i}_${sub}`.slice(0, 120)
+}
+
+function buildLocalSeed() {
   const groups = []
   const lessons = []
-
   for (const name of SCHEDULE_GROUPS) {
     const id = groupIdFromName(name)
-    const starostaCodeHash = CODE_HASHES.groups[name]
-    if (!starostaCodeHash) throw new Error(`Нет хэша кода для группы ${name}`)
     groups.push({
       id,
       name,
       faculty: facultyFromName(name),
       active: true,
-      starostaCodeHash,
+      starostaCodeHash: CODE_HASHES.groups[name],
     })
     const rows = SCHEDULE_LESSONS[name] || []
-    for (const l of rows) {
+    rows.forEach((l, i) => {
       lessons.push({
-        id: uid('les'),
+        id: lessonId(id, l, i),
         groupId: id,
         day: Number(l.day),
         start: l.start,
@@ -58,9 +63,8 @@ async function buildSeed() {
         weekType: l.weekType || 'every',
         pair: l.pair || null,
       })
-    }
+    })
   }
-
   return {
     version: DB_VERSION,
     semesterLabel: SEMESTER_LABEL,
@@ -70,32 +74,135 @@ async function buildSeed() {
     overrides: [],
     homework: [],
     audit: [],
+    remote: false,
+  }
+}
+
+async function loadFromSupabase() {
+  const [metaRes, groupsRes, lessonsRes, hwRes, ovrRes] = await Promise.all([
+    supabase.rpc('rasp_public_meta'),
+    supabase.from('groups').select('id,name,faculty,active').eq('active', true),
+    supabase.from('lessons').select('*'),
+    supabase.from('homework').select('*'),
+    supabase.from('overrides').select('*'),
+  ])
+  for (const r of [metaRes, groupsRes, lessonsRes, hwRes, ovrRes]) {
+    if (r.error) throw r.error
+  }
+
+  return {
+    version: DB_VERSION,
+    semesterLabel: metaRes.data?.semesterLabel || SEMESTER_LABEL,
+    adminCodeHash: '',
+    groups: (groupsRes.data || []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      faculty: g.faculty || '',
+      active: g.active,
+      starostaCodeHash: '',
+    })),
+    lessons: (lessonsRes.data || []).map((l) => ({
+      id: l.id,
+      groupId: l.group_id,
+      day: l.day,
+      start: l.start_time,
+      end: l.end_time,
+      subject: l.subject,
+      teacher: l.teacher || '',
+      room: l.room || '',
+      remote: !!l.remote,
+      weekType: l.week_type || 'every',
+      pair: l.pair,
+    })),
+    homework: (hwRes.data || []).map((h) => ({
+      id: h.id,
+      groupId: h.group_id,
+      subject: h.subject,
+      text: h.body,
+      dueDate: h.due_date || '',
+      lessonId: h.lesson_id,
+      createdAt: h.created_at,
+    })),
+    overrides: (ovrRes.data || []).map((o) => ({
+      id: o.id,
+      groupId: o.group_id,
+      lessonId: o.lesson_id,
+      date: o.on_date,
+      type: o.type,
+      newRoom: o.new_room || '',
+      newSubject: o.new_subject || '',
+      note: o.note || '',
+    })),
+    audit: [],
+    remote: true,
   }
 }
 
 function loadRaw() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    return JSON.parse(raw)
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
   } catch {
     return null
   }
 }
 
-function saveRaw(db) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(db))
+function saveRaw(data) {
+  if (data.remote) return // remote is source of truth
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
 }
 
 let db = null
 
+export function isRemoteMode() {
+  return !!(db && db.remote)
+}
+
 export async function initStore() {
+  if (supabaseConfigured) {
+    try {
+      db = await loadFromSupabase()
+      return db
+    } catch (e) {
+      console.warn('Supabase load failed, local fallback', e)
+    }
+  }
   db = loadRaw()
-  if (!db || db.version !== DB_VERSION) {
-    db = await buildSeed()
+  if (!db || db.version !== DB_VERSION || db.remote) {
+    db = buildLocalSeed()
     saveRaw(db)
   }
   return db
+}
+
+export async function refreshMutable() {
+  if (!supabaseConfigured || !db?.remote) return
+  const [hwRes, ovrRes] = await Promise.all([
+    supabase.from('homework').select('*'),
+    supabase.from('overrides').select('*'),
+  ])
+  if (!hwRes.error) {
+    db.homework = (hwRes.data || []).map((h) => ({
+      id: h.id,
+      groupId: h.group_id,
+      subject: h.subject,
+      text: h.body,
+      dueDate: h.due_date || '',
+      lessonId: h.lesson_id,
+      createdAt: h.created_at,
+    }))
+  }
+  if (!ovrRes.error) {
+    db.overrides = (ovrRes.data || []).map((o) => ({
+      id: o.id,
+      groupId: o.group_id,
+      lessonId: o.lesson_id,
+      date: o.on_date,
+      type: o.type,
+      newRoom: o.new_room || '',
+      newSubject: o.new_subject || '',
+      note: o.note || '',
+    }))
+  }
 }
 
 export function getDefaultGroupId() {
@@ -135,18 +242,14 @@ export function getHomework(groupId, { subject, fromDate } = {}) {
     .filter((h) => {
       if (h.groupId !== groupId) return false
       if (subject && h.subject !== subject) return false
-      if (fromDate && h.dueDate < fromDate) return false
+      if (fromDate && h.dueDate && h.dueDate < fromDate) return false
       return true
     })
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')))
 }
 
 function pushAudit(entry) {
-  db.audit.unshift({
-    id: uid('aud'),
-    at: new Date().toISOString(),
-    ...entry,
-  })
+  db.audit.unshift({ id: uid('aud'), at: new Date().toISOString(), ...entry })
   db.audit = db.audit.slice(0, 200)
 }
 
@@ -171,7 +274,11 @@ export function getSession() {
   }
 }
 
-export function logout() {
+export async function logout() {
+  const s = getSession()
+  if (s?.token && supabaseConfigured) {
+    await supabase.rpc('rasp_logout', { p_token: s.token })
+  }
   sessionStorage.removeItem(SESSION_KEY)
 }
 
@@ -181,31 +288,37 @@ export async function loginWithCode(code, groupIdHint = null) {
     throw new Error(`Код слишком короткий (мин. ${LIMITS.minCodeLength})`)
   }
 
+  if (db.remote && supabaseConfigured) {
+    const { data, error } = await supabase.rpc('rasp_login', {
+      p_code: clean,
+      p_group_id: groupIdHint || null,
+    })
+    if (error) throw new Error(rpcErrorMessage(error))
+    const session = {
+      role: data.role,
+      groupId: data.groupId,
+      token: data.token,
+      expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+    }
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
+    return session
+  }
+
   const bucket = `login:${groupIdHint || 'any'}`
   const rate = checkRateLimit(bucket)
   if (!rate.ok) {
     throw new Error(`Слишком много попыток. Подождите ${Math.ceil(rate.retryAfterMs / 60000)} мин.`)
   }
-
   const hash = await hashAccessCode(clean, CODE_SALT)
-
   if (timingSafeEqual(hash, db.adminCodeHash)) {
     clearRateLimit(bucket)
-    const session = {
-      role: 'admin',
-      groupId: null,
-      expiresAt: Date.now() + 12 * 60 * 60 * 1000,
-    }
+    const session = { role: 'admin', groupId: null, expiresAt: Date.now() + 12 * 60 * 60 * 1000 }
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
-    pushAudit({ action: 'login_admin', groupId: null })
+    pushAudit({ action: 'login_admin' })
     saveRaw(db)
     return session
   }
-
-  const groups = groupIdHint
-    ? [getGroup(groupIdHint)].filter(Boolean)
-    : db.groups
-
+  const groups = groupIdHint ? [getGroup(groupIdHint)].filter(Boolean) : db.groups
   for (const g of groups) {
     if (timingSafeEqual(hash, g.starostaCodeHash)) {
       clearRateLimit(bucket)
@@ -220,41 +333,61 @@ export async function loginWithCode(code, groupIdHint = null) {
       return session
     }
   }
-
   const fail = registerFailedAttempt(bucket)
-  if (fail.locked) {
-    throw new Error('Слишком много попыток. Вход заблокирован на 15 минут.')
-  }
+  if (fail.locked) throw new Error('Слишком много попыток. Вход заблокирован на 15 минут.')
   throw new Error('Неверный код')
 }
 
-export function addHomework(groupId, { subject, text, dueDate, lessonId }) {
+export async function addHomework(groupId, { subject, text, dueDate, lessonId }) {
   const session = getSession()
   requireWrite(session, groupId)
+  const subj = sanitizeText(subject, LIMITS.subject)
+  const body = sanitizeText(text, LIMITS.homework)
+  const due = sanitizeText(dueDate, 32)
+  if (!subj || !body) throw new Error('Укажите предмет и текст ДЗ')
+
+  if (db.remote && supabaseConfigured) {
+    const { error } = await supabase.rpc('rasp_add_homework', {
+      p_token: session.token,
+      p_group_id: groupId,
+      p_subject: subj,
+      p_body: body,
+      p_due_date: due || null,
+      p_lesson_id: lessonId || null,
+    })
+    if (error) throw new Error(rpcErrorMessage(error))
+    await refreshMutable()
+    return
+  }
+
   const item = {
     id: uid('hw'),
     groupId,
-    subject: sanitizeText(subject, LIMITS.subject),
-    text: sanitizeText(text, LIMITS.homework),
-    dueDate: sanitizeText(dueDate, 32),
+    subject: subj,
+    text: body,
+    dueDate: due,
     lessonId: lessonId || null,
     createdAt: new Date().toISOString(),
   }
-  if (!item.subject || !item.text) throw new Error('Укажите предмет и текст ДЗ')
   db.homework.push(item)
-  pushAudit({
-    action: 'homework_add',
-    groupId,
-    detail: item.subject,
-    by: session.role,
-  })
+  pushAudit({ action: 'homework_add', groupId, detail: subj, by: session.role })
   saveRaw(db)
   return item
 }
 
-export function deleteHomework(groupId, hwId) {
+export async function deleteHomework(groupId, hwId) {
   const session = getSession()
   requireWrite(session, groupId)
+  if (db.remote && supabaseConfigured) {
+    const { error } = await supabase.rpc('rasp_delete_homework', {
+      p_token: session.token,
+      p_group_id: groupId,
+      p_hw_id: hwId,
+    })
+    if (error) throw new Error(rpcErrorMessage(error))
+    await refreshMutable()
+    return
+  }
   const before = db.homework.length
   db.homework = db.homework.filter((h) => !(h.id === hwId && h.groupId === groupId))
   if (db.homework.length === before) throw new Error('ДЗ не найдено')
@@ -262,23 +395,35 @@ export function deleteHomework(groupId, hwId) {
   saveRaw(db)
 }
 
-/**
- * type: room_only | subject | subject_and_room | cancelled
- */
-export function setOverride(groupId, payload) {
+export async function setOverride(groupId, payload) {
   const session = getSession()
   requireWrite(session, groupId)
   const date = sanitizeText(payload.date, 32)
-  const lessonId = sanitizeText(payload.lessonId, 64)
+  const lessonId = sanitizeText(payload.lessonId, 120)
   const type = payload.type
   const allowed = ['room_only', 'subject', 'subject_and_room', 'cancelled']
   if (!allowed.includes(type)) throw new Error('Неверный тип замены')
   if (!date || !lessonId) throw new Error('Укажите дату и пару')
 
+  if (db.remote && supabaseConfigured) {
+    const { error } = await supabase.rpc('rasp_set_override', {
+      p_token: session.token,
+      p_group_id: groupId,
+      p_lesson_id: lessonId,
+      p_date: date,
+      p_type: type,
+      p_new_room: sanitizeText(payload.newRoom || '', LIMITS.room),
+      p_new_subject: sanitizeText(payload.newSubject || '', LIMITS.subject),
+      p_note: sanitizeText(payload.note || '', 200),
+    })
+    if (error) throw new Error(rpcErrorMessage(error))
+    await refreshMutable()
+    return
+  }
+
   db.overrides = db.overrides.filter(
     (o) => !(o.groupId === groupId && o.date === date && o.lessonId === lessonId),
   )
-
   const row = {
     id: uid('ovr'),
     groupId,
@@ -290,38 +435,27 @@ export function setOverride(groupId, payload) {
     note: sanitizeText(payload.note || '', 200),
   }
   db.overrides.push(row)
-  pushAudit({
-    action: 'override_set',
-    groupId,
-    detail: `${type} ${date}`,
-    by: session.role,
-  })
+  pushAudit({ action: 'override_set', groupId, detail: `${type} ${date}`, by: session.role })
   saveRaw(db)
   return row
 }
 
-export function clearOverride(groupId, overrideId) {
+export async function clearOverride(groupId, overrideId) {
   const session = getSession()
   requireWrite(session, groupId)
+  if (db.remote && supabaseConfigured) {
+    const { error } = await supabase.rpc('rasp_clear_override', {
+      p_token: session.token,
+      p_group_id: groupId,
+      p_override_id: overrideId,
+    })
+    if (error) throw new Error(rpcErrorMessage(error))
+    await refreshMutable()
+    return
+  }
   db.overrides = db.overrides.filter((o) => !(o.id === overrideId && o.groupId === groupId))
   pushAudit({ action: 'override_clear', groupId, detail: overrideId, by: session.role })
   saveRaw(db)
-}
-
-export function updateLessonRoom(groupId, lessonId, room) {
-  const session = getSession()
-  requireWrite(session, groupId)
-  const lesson = db.lessons.find((l) => l.id === lessonId && l.groupId === groupId)
-  if (!lesson) throw new Error('Пара не найдена')
-  lesson.room = sanitizeText(room, LIMITS.room)
-  pushAudit({
-    action: 'room_update',
-    groupId,
-    detail: `${lesson.subject} → ${lesson.room}`,
-    by: session.role,
-  })
-  saveRaw(db)
-  return lesson
 }
 
 export async function createGroup({ name, faculty, starostaCode }) {
@@ -334,9 +468,22 @@ export async function createGroup({ name, faculty, starostaCode }) {
   if (code.length < LIMITS.minCodeLength) {
     throw new Error(`Код старосты: мин. ${LIMITS.minCodeLength} символов`)
   }
+
+  if (db.remote && supabaseConfigured) {
+    const { data, error } = await supabase.rpc('rasp_create_group', {
+      p_token: session.token,
+      p_name: gName,
+      p_faculty: sanitizeText(faculty || '', 32),
+      p_starosta_code: code,
+    })
+    if (error) throw new Error(rpcErrorMessage(error))
+    db = await loadFromSupabase()
+    return { id: data.id, name: data.name }
+  }
+
   const starostaCodeHash = await hashAccessCode(code, CODE_SALT)
   const group = {
-    id: uid('g'),
+    id: groupIdFromName(gName),
     name: gName,
     faculty: sanitizeText(faculty || '', 32),
     active: true,
@@ -351,48 +498,41 @@ export async function createGroup({ name, faculty, starostaCode }) {
 export async function resetStarostaCode(groupId, newCode) {
   const session = getSession()
   if (!session || session.role !== 'admin') throw new Error('Только админ')
+  const code = sanitizeText(newCode, LIMITS.accessCode)
+  if (code.length < LIMITS.minCodeLength) throw new Error(`Код: мин. ${LIMITS.minCodeLength} символов`)
+
+  if (db.remote && supabaseConfigured) {
+    const { error } = await supabase.rpc('rasp_reset_code', {
+      p_token: session.token,
+      p_group_id: groupId,
+      p_new_code: code,
+    })
+    if (error) throw new Error(rpcErrorMessage(error))
+    return
+  }
   const g = getGroup(groupId)
   if (!g) throw new Error('Группа не найдена')
-  const code = sanitizeText(newCode, LIMITS.accessCode)
-  if (code.length < LIMITS.minCodeLength) {
-    throw new Error(`Код: мин. ${LIMITS.minCodeLength} символов`)
-  }
   g.starostaCodeHash = await hashAccessCode(code, CODE_SALT)
   pushAudit({ action: 'code_reset', groupId, by: 'admin' })
   saveRaw(db)
 }
 
-export function resetSemester(groupId) {
+export async function resetSemester(groupId) {
   const session = getSession()
   if (!session || session.role !== 'admin') throw new Error('Только админ')
-  const g = getGroup(groupId)
-  if (!g) throw new Error('Группа не найдена')
+  if (db.remote && supabaseConfigured) {
+    const { error } = await supabase.rpc('rasp_reset_semester', {
+      p_token: session.token,
+      p_group_id: groupId,
+    })
+    if (error) throw new Error(rpcErrorMessage(error))
+    db = await loadFromSupabase()
+    return
+  }
   db.lessons = db.lessons.filter((l) => l.groupId !== groupId)
   db.overrides = db.overrides.filter((o) => o.groupId !== groupId)
   db.homework = db.homework.filter((h) => h.groupId !== groupId)
   pushAudit({ action: 'semester_reset', groupId, by: 'admin' })
-  saveRaw(db)
-}
-
-export function importLessons(groupId, lessons) {
-  const session = getSession()
-  if (!session || (session.role !== 'admin' && !(session.role === 'starosta' && session.groupId === groupId))) {
-    throw new Error('Нет прав')
-  }
-  for (const raw of lessons) {
-    db.lessons.push({
-      id: uid('les'),
-      groupId,
-      day: Number(raw.day),
-      start: sanitizeText(raw.start, 8),
-      end: sanitizeText(raw.end, 8),
-      subject: sanitizeText(raw.subject, LIMITS.subject),
-      room: sanitizeText(raw.room || '', LIMITS.room),
-      remote: !!raw.remote,
-      weekType: raw.weekType || 'every',
-    })
-  }
-  pushAudit({ action: 'lessons_import', groupId, detail: String(lessons.length), by: session.role })
   saveRaw(db)
 }
 
@@ -406,7 +546,6 @@ export function getSemesterLabel() {
   return db.semesterLabel || ''
 }
 
-/** Effective lesson view for a date: merge base + override */
 export function resolveLesson(lesson, override) {
   if (!override) {
     return {
@@ -447,7 +586,6 @@ export function resolveLesson(lesson, override) {
       oldSubject: lesson.subject,
     }
   }
-  // subject_and_room
   return {
     ...lesson,
     effectiveSubject: override.newSubject || lesson.subject,
