@@ -24,7 +24,10 @@ import {
   getDb,
   getDefaultGroupId,
   isRemoteMode,
+  getConnectionError,
+  refreshMutable,
 } from './lib/store.js'
+import { supabaseConfigured } from './lib/supabase.js'
 
 const SELECTED_GROUP_KEY = 'rasp_selected_group_v2'
 
@@ -703,6 +706,31 @@ function render() {
   }
 
   root.append(renderTop(group))
+  if (getConnectionError()) {
+    root.append(
+      el('p', {
+        className: 'error',
+        style: 'padding:0 16px',
+        text: getConnectionError(),
+      }),
+    )
+  } else if (supabaseConfigured && isRemoteMode()) {
+    root.append(
+      el('p', {
+        className: 'ok',
+        style: 'padding:0 16px;font-size:12px',
+        text: 'Общая база · ДЗ и замены синхронизируются',
+      }),
+    )
+  } else if (supabaseConfigured && !isRemoteMode()) {
+    root.append(
+      el('p', {
+        className: 'error',
+        style: 'padding:0 16px',
+        text: 'Локальный режим — ДЗ не увидят другие. Обнови страницу.',
+      }),
+    )
+  }
   if (state.error) {
     root.append(el('p', { className: 'error', style: 'padding:0 16px', text: state.error }))
   }
@@ -724,3 +752,16 @@ if (!state.groupId || !getGroup(state.groupId)) {
   localStorage.setItem(SELECTED_GROUP_KEY, state.groupId)
 }
 render()
+
+// pull shared HW/overrides periodically
+if (supabaseConfigured) {
+  setInterval(async () => {
+    try {
+      if (!isRemoteMode()) return
+      await refreshMutable()
+      render()
+    } catch {
+      /* ignore transient */
+    }
+  }, 20000)
+}

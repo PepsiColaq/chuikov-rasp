@@ -157,13 +157,28 @@ export function isRemoteMode() {
   return !!(db && db.remote)
 }
 
+export function getConnectionError() {
+  return db?.connectionError || null
+}
+
 export async function initStore() {
   if (supabaseConfigured) {
     try {
       db = await loadFromSupabase()
+      // drop stale local copy so it doesn't confuse
+      try {
+        localStorage.removeItem(STORAGE_KEY)
+      } catch {
+        /* ignore */
+      }
       return db
     } catch (e) {
-      console.warn('Supabase load failed, local fallback', e)
+      console.warn('Supabase load failed', e)
+      db = buildLocalSeed()
+      db.remote = false
+      db.connectionError =
+        'Нет связи с общей базой. ДЗ сохранится только на этом устройстве. Обнови страницу.'
+      return db
     }
   }
   db = loadRaw()
@@ -171,6 +186,7 @@ export async function initStore() {
     db = buildLocalSeed()
     saveRaw(db)
   }
+  db.connectionError = null
   return db
 }
 
@@ -180,29 +196,27 @@ export async function refreshMutable() {
     supabase.from('homework').select('*'),
     supabase.from('overrides').select('*'),
   ])
-  if (!hwRes.error) {
-    db.homework = (hwRes.data || []).map((h) => ({
-      id: h.id,
-      groupId: h.group_id,
-      subject: h.subject,
-      text: h.body,
-      dueDate: h.due_date || '',
-      lessonId: h.lesson_id,
-      createdAt: h.created_at,
-    }))
-  }
-  if (!ovrRes.error) {
-    db.overrides = (ovrRes.data || []).map((o) => ({
-      id: o.id,
-      groupId: o.group_id,
-      lessonId: o.lesson_id,
-      date: o.on_date,
-      type: o.type,
-      newRoom: o.new_room || '',
-      newSubject: o.new_subject || '',
-      note: o.note || '',
-    }))
-  }
+  if (hwRes.error) throw hwRes.error
+  if (ovrRes.error) throw ovrRes.error
+  db.homework = (hwRes.data || []).map((h) => ({
+    id: h.id,
+    groupId: h.group_id,
+    subject: h.subject,
+    text: h.body,
+    dueDate: h.due_date || '',
+    lessonId: h.lesson_id,
+    createdAt: h.created_at,
+  }))
+  db.overrides = (ovrRes.data || []).map((o) => ({
+    id: o.id,
+    groupId: o.group_id,
+    lessonId: o.lesson_id,
+    date: o.on_date,
+    type: o.type,
+    newRoom: o.new_room || '',
+    newSubject: o.new_subject || '',
+    note: o.note || '',
+  }))
 }
 
 export function getDefaultGroupId() {
@@ -288,12 +302,16 @@ export async function loginWithCode(code, groupIdHint = null) {
     throw new Error(`Код слишком короткий (мин. ${LIMITS.minCodeLength})`)
   }
 
-  if (db.remote && supabaseConfigured) {
+  if (supabaseConfigured) {
     const { data, error } = await supabase.rpc('rasp_login', {
       p_code: clean,
       p_group_id: groupIdHint || null,
     })
     if (error) throw new Error(rpcErrorMessage(error))
+    // ensure we're on remote data after login
+    if (!db.remote) {
+      db = await loadFromSupabase()
+    }
     const session = {
       role: data.role,
       groupId: data.groupId,
@@ -346,7 +364,9 @@ export async function addHomework(groupId, { subject, text, dueDate, lessonId })
   const due = sanitizeText(dueDate, 32)
   if (!subj || !body) throw new Error('Укажите предмет и текст ДЗ')
 
-  if (db.remote && supabaseConfigured) {
+  if (supabaseConfigured) {
+    if (!session.token) throw new Error('Нет связи с общей базой — обнови страницу и войди снова')
+    if (!db.remote) db = await loadFromSupabase()
     const { error } = await supabase.rpc('rasp_add_homework', {
       p_token: session.token,
       p_group_id: groupId,
@@ -378,7 +398,8 @@ export async function addHomework(groupId, { subject, text, dueDate, lessonId })
 export async function deleteHomework(groupId, hwId) {
   const session = getSession()
   requireWrite(session, groupId)
-  if (db.remote && supabaseConfigured) {
+  if (supabaseConfigured) {
+    if (!session.token) throw new Error('Нет связи с общей базой — обнови страницу и войди снова')
     const { error } = await supabase.rpc('rasp_delete_homework', {
       p_token: session.token,
       p_group_id: groupId,
@@ -405,7 +426,9 @@ export async function setOverride(groupId, payload) {
   if (!allowed.includes(type)) throw new Error('Неверный тип замены')
   if (!date || !lessonId) throw new Error('Укажите дату и пару')
 
-  if (db.remote && supabaseConfigured) {
+  if (supabaseConfigured) {
+    if (!session.token) throw new Error('Нет связи с общей базой — обнови страницу и войди снова')
+    if (!db.remote) db = await loadFromSupabase()
     const { error } = await supabase.rpc('rasp_set_override', {
       p_token: session.token,
       p_group_id: groupId,
@@ -443,7 +466,8 @@ export async function setOverride(groupId, payload) {
 export async function clearOverride(groupId, overrideId) {
   const session = getSession()
   requireWrite(session, groupId)
-  if (db.remote && supabaseConfigured) {
+  if (supabaseConfigured) {
+    if (!session.token) throw new Error('Нет связи с общей базой — обнови страницу и войди снова')
     const { error } = await supabase.rpc('rasp_clear_override', {
       p_token: session.token,
       p_group_id: groupId,
@@ -469,7 +493,8 @@ export async function createGroup({ name, faculty, starostaCode }) {
     throw new Error(`Код старосты: мин. ${LIMITS.minCodeLength} символов`)
   }
 
-  if (db.remote && supabaseConfigured) {
+  if (supabaseConfigured) {
+    if (!session.token) throw new Error('Нет связи с общей базой — обнови страницу и войди снова')
     const { data, error } = await supabase.rpc('rasp_create_group', {
       p_token: session.token,
       p_name: gName,
@@ -501,7 +526,8 @@ export async function resetStarostaCode(groupId, newCode) {
   const code = sanitizeText(newCode, LIMITS.accessCode)
   if (code.length < LIMITS.minCodeLength) throw new Error(`Код: мин. ${LIMITS.minCodeLength} символов`)
 
-  if (db.remote && supabaseConfigured) {
+  if (supabaseConfigured) {
+    if (!session.token) throw new Error('Нет связи с общей базой — обнови страницу и войди снова')
     const { error } = await supabase.rpc('rasp_reset_code', {
       p_token: session.token,
       p_group_id: groupId,
@@ -520,7 +546,8 @@ export async function resetStarostaCode(groupId, newCode) {
 export async function resetSemester(groupId) {
   const session = getSession()
   if (!session || session.role !== 'admin') throw new Error('Только админ')
-  if (db.remote && supabaseConfigured) {
+  if (supabaseConfigured) {
+    if (!session.token) throw new Error('Нет связи с общей базой — обнови страницу и войди снова')
     const { error } = await supabase.rpc('rasp_reset_semester', {
       p_token: session.token,
       p_group_id: groupId,
