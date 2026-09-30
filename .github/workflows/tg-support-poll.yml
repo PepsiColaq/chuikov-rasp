@@ -1,0 +1,26 @@
+# Telegram support bot — runs on GitHub (no local PC needed)
+name: tg-support-poll
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 5 minutes; each job listens ~4.5 min → near-continuous
+    - cron: '*/5 * * * *'
+concurrency:
+  group: tg-support-poll
+  cancel-in-progress: false
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Poll Telegram bot
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_ADMIN_CHAT_ID: ${{ secrets.TG_ADMIN_CHAT_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/tg-support-poll.mjs --minutes=4.5
