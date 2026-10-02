@@ -1,17 +1,28 @@
 /* Offline shell — bump CACHE to drop stale HTML/JS */
-const CACHE = 'rasp-shell-v70'
+const CACHE = 'rasp-shell-v71'
 const SCOPE_PATH = '/chuikov-rasp/'
 
 self.addEventListener('install', (event) => {
-  // Don't precache index.html — it must always be fresh (kill-switch UI).
-  event.waitUntil(self.skipWaiting())
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(CACHE)
+      try {
+        // HTML в кэше — холодный старт сразу с заставкой, без долгой «Загрузка…» Chrome
+        const idx = await fetch(SCOPE_PATH, { cache: 'no-store' })
+        if (idx.ok) await cache.put(SCOPE_PATH, idx.clone())
+      } catch {
+        /* ignore */
+      }
+      await self.skipWaiting()
+    })(),
+  )
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   )
 })
@@ -24,7 +35,7 @@ self.addEventListener('fetch', (event) => {
   if (url.hostname.includes('supabase.co')) return
   if (url.origin !== self.location.origin) return
 
-  // Always fresh HTML / entry
+  // HTML: из кэша мгновенно (заставка), сеть обновляет в фоне
   if (
     req.mode === 'navigate' ||
     req.destination === 'document' ||
@@ -33,26 +44,40 @@ self.addEventListener('fetch', (event) => {
     url.pathname.endsWith('/index.html')
   ) {
     event.respondWith(
-      fetch(req, { cache: 'no-store' }).catch(
-        () =>
-          new Response('<!doctype html><meta charset=utf-8><p>Нет сети</p>', {
-            headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          }),
-      ),
+      (async () => {
+        const cache = await caches.open(CACHE)
+        const cached = await cache.match(SCOPE_PATH)
+
+        const update = fetch(req, { cache: 'no-store' })
+          .then(async (fresh) => {
+            if (fresh && fresh.ok) await cache.put(SCOPE_PATH, fresh.clone())
+            return fresh
+          })
+          .catch(() => null)
+
+        if (cached) {
+          update.catch(() => {})
+          return cached
+        }
+
+        const fresh = await update
+        if (fresh) return fresh
+        return new Response('<!doctype html><meta charset=utf-8><p>Нет сети</p>', {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        })
+      })(),
     )
     return
   }
 
-  // Manifest + icons + sw itself: network first
   if (
     url.pathname.endsWith('manifest.webmanifest') ||
     url.pathname.endsWith('/sw.js') ||
+    url.pathname.includes('boot-gate.js') ||
     /\/icon[^/]*\.(png|svg)$/i.test(url.pathname) ||
     /apple-touch-icon/i.test(url.pathname)
   ) {
-    event.respondWith(
-      fetch(req, { cache: 'no-store' }).catch(() => caches.match(req)),
-    )
+    event.respondWith(fetch(req, { cache: 'no-store' }).catch(() => caches.match(req)))
     return
   }
 
