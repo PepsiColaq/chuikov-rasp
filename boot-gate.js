@@ -1,4 +1,7 @@
-/* Синхронно до отрисовки body: не мигать заставкой при F5 */
+/* Синхронно до отрисовки body: не мигать заставкой при F5.
+   Не используем sessionStorage: после «убить Chrome» Android часто
+   восстанавливает вкладку вместе с sessionStorage — и заставка тогда
+   ошибочно скрывалась, оставался пустой экран / «Загрузка…». */
 ;(function () {
   try {
     var theme = localStorage.getItem('rasp_theme_v1')
@@ -9,7 +12,11 @@
     /* ignore */
   }
   try {
-    if (sessionStorage.getItem('rasp_splash_seen_v1') === '1') {
+    var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0]
+    var isReload = nav
+      ? nav.type === 'reload'
+      : performance.navigation && performance.navigation.type === 1
+    if (isReload) {
       document.documentElement.classList.add('boot-skip-splash')
     }
   } catch (_) {
