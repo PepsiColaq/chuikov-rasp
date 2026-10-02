@@ -1,5 +1,5 @@
 /* Offline shell — bump CACHE to drop stale HTML/JS */
-const CACHE = 'rasp-shell-v86'
+const CACHE = 'rasp-shell-v87'
 const SCOPE_PATH = '/chuikov-rasp/'
 
 self.addEventListener('install', (event) => {
