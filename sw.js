@@ -1,5 +1,5 @@
 /* Offline shell — bump CACHE to drop stale HTML/JS */
-const CACHE = 'rasp-shell-v112'
+const CACHE = 'rasp-shell-v113'
 const SCOPE_PATH = '/chuikov-rasp/'
 
 function assetUrlsFromHtml(html) {
@@ -8,7 +8,6 @@ function assetUrlsFromHtml(html) {
   let m
   while ((m = re.exec(html))) {
     const u = m[1]
-    // hashed assets, boot-gate, logo — критично для cold start PWA
     if (
       u.includes('/assets/') ||
       u.includes('boot-gate.js') ||
@@ -44,7 +43,7 @@ async function putHtml(cache, html) {
   )
 }
 
-/** Кладём HTML только после JS/CSS — иначе Android PWA зависает на синей заставке. */
+/** Кладём HTML только после JS/CSS — иначе Android PWA зависает на иконке. */
 async function commitShell(cache, html) {
   const urls = assetUrlsFromHtml(html)
   let need = 0
@@ -80,7 +79,6 @@ async function precacheFromNetwork(cache) {
 async function matchAsset(req) {
   const exact = await caches.match(req)
   if (exact) return exact
-  // fallback: любой кэш (после обновления SW старые hashed файлы ещё могут быть нужны)
   const keys = await caches.keys()
   for (const k of keys) {
     const c = await caches.open(k)
@@ -96,13 +94,51 @@ async function shellReady(cache) {
   try {
     const html = await htmlRes.clone().text()
     const critical = assetUrlsFromHtml(html).filter(isCriticalAsset)
+    if (!critical.length) return false
     for (const path of critical) {
       if (!(await cache.match(path))) return false
     }
-    return critical.length > 0
+    return true
   } catch {
     return false
   }
+}
+
+/** HTML из текущего или ЛЮБОГО старого rasp-shell-* (после bump CACHE новый кэш пуст). */
+async function matchHtml() {
+  const cur = await caches.open(CACHE)
+  const hit = await cur.match(SCOPE_PATH)
+  if (hit) return hit
+  const keys = await caches.keys()
+  for (const k of keys) {
+    if (k === CACHE) continue
+    if (!String(k).startsWith('rasp-shell-')) continue
+    const c = await caches.open(k)
+    const older = await c.match(SCOPE_PATH)
+    if (older) return older
+  }
+  return null
+}
+
+/** Если новый CACHE пуст — скопировать рабочий shell из предыдущей версии. */
+async function adoptPreviousShell(cache) {
+  if (await shellReady(cache)) return true
+  const keys = await caches.keys()
+  for (const k of keys) {
+    if (k === CACHE) continue
+    if (!String(k).startsWith('rasp-shell-')) continue
+    const old = await caches.open(k)
+    if (!(await shellReady(old))) continue
+    const reqs = await old.keys()
+    await Promise.all(
+      reqs.map(async (req) => {
+        const res = await old.match(req)
+        if (res) await cache.put(req, res.clone())
+      }),
+    )
+    return shellReady(cache)
+  }
+  return false
 }
 
 self.addEventListener('install', (event) => {
@@ -112,7 +148,11 @@ self.addEventListener('install', (event) => {
       try {
         await precacheFromNetwork(cache)
       } catch {
-        /* первая установка без сети — ок, будет network */
+        try {
+          await adoptPreviousShell(cache)
+        } catch {
+          /* ок */
+        }
       }
       await self.skipWaiting()
     })(),
@@ -123,8 +163,8 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE)
-      // Старые кэши не трогаем, пока новый shell+JS не готов — иначе Pixel PWA
-      // открывает новый HTML без скриптов (вечная синяя заставка).
+      await adoptPreviousShell(cache)
+      // Старые кэши не трогаем, пока новый shell+JS не готов
       if (await shellReady(cache)) {
         const keys = await caches.keys()
         await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
@@ -153,9 +193,8 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE)
-        const cached = await cache.match(SCOPE_PATH)
+        const cached = await matchHtml()
 
-        // Фоновое обновление: HTML в кэш только вместе с ассетами
         const networkUpdate = fetchWithTimeout(SCOPE_PATH, 10000, { cache: 'no-store' })
           .then(async (fresh) => {
             if (fresh && fresh.ok) {
@@ -166,6 +205,7 @@ self.addEventListener('fetch', (event) => {
           })
           .catch(() => null)
 
+        // Всегда отдаём кэш сразу — иначе Android ~4с держит иконку ярлыка
         if (cached) {
           networkUpdate.catch(() => {})
           return cached
@@ -200,12 +240,12 @@ self.addEventListener('fetch', (event) => {
         try {
           const fresh = await fetchWithTimeout(req.url, 6000, { cache: 'no-store' })
           if (fresh && fresh.ok) {
-            const cache = await caches.open(CACHE)
-            cache.put(req, fresh.clone())
+            const c = await caches.open(CACHE)
+            c.put(req, fresh.clone())
             return fresh
           }
         } catch {
-          /* fallback cache */
+          /* fallback */
         }
         return cached || Response.error()
       })(),
@@ -213,7 +253,6 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // JS/CSS: сначала кэш (быстрый cold start PWA), потом сеть с таймаутом
   if (url.pathname.includes('/assets/') || url.pathname.endsWith('college-logo.jpg')) {
     event.respondWith(
       (async () => {
@@ -222,8 +261,8 @@ self.addEventListener('fetch', (event) => {
           fetchWithTimeout(req.url, 8000)
             .then(async (fresh) => {
               if (fresh && fresh.ok) {
-                const cache = await caches.open(CACHE)
-                cache.put(req, fresh.clone())
+                const c = await caches.open(CACHE)
+                c.put(req, fresh.clone())
               }
             })
             .catch(() => {})
@@ -232,8 +271,8 @@ self.addEventListener('fetch', (event) => {
         try {
           const fresh = await fetchWithTimeout(req.url, 8000)
           if (fresh && fresh.ok) {
-            const cache = await caches.open(CACHE)
-            cache.put(req, fresh.clone())
+            const c = await caches.open(CACHE)
+            c.put(req, fresh.clone())
           }
           return fresh
         } catch {
