@@ -1,5 +1,5 @@
 /* Offline shell — bump CACHE to drop stale HTML/JS */
-const CACHE = 'rasp-shell-v110'
+const CACHE = 'rasp-shell-v111'
 const SCOPE_PATH = '/chuikov-rasp/'
 
 function assetUrlsFromHtml(html) {
@@ -21,6 +21,20 @@ function assetUrlsFromHtml(html) {
   return [...new Set(out)]
 }
 
+function isCriticalAsset(path) {
+  return path.includes('/assets/') || path.includes('boot-gate.js')
+}
+
+async function fetchWithTimeout(url, ms = 8000, init = {}) {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal })
+  } finally {
+    clearTimeout(t)
+  }
+}
+
 async function putHtml(cache, html) {
   await cache.put(
     SCOPE_PATH,
@@ -30,22 +44,37 @@ async function putHtml(cache, html) {
   )
 }
 
-async function precacheFromNetwork(cache) {
-  const idx = await fetch(SCOPE_PATH, { cache: 'no-store' })
-  if (!idx.ok) throw new Error('html ' + idx.status)
-  const html = await idx.text()
-  await putHtml(cache, html)
+/** Кладём HTML только после JS/CSS — иначе Android PWA зависает на синей заставке. */
+async function commitShell(cache, html) {
   const urls = assetUrlsFromHtml(html)
+  let need = 0
+  let ok = 0
   await Promise.all(
     urls.map(async (path) => {
+      const critical = isCriticalAsset(path)
+      if (critical) need += 1
       try {
-        const r = await fetch(path, { cache: 'no-store' })
-        if (r.ok) await cache.put(path, r.clone())
+        const r = await fetchWithTimeout(path, 8000, { cache: 'no-store' })
+        if (r && r.ok) {
+          await cache.put(path, r.clone())
+          if (critical) ok += 1
+        }
       } catch {
-        /* ignore one asset */
+        /* один ассет */
       }
     }),
   )
+  if (need > 0 && ok < need) return false
+  await putHtml(cache, html)
+  return true
+}
+
+async function precacheFromNetwork(cache) {
+  const idx = await fetchWithTimeout(SCOPE_PATH, 10000, { cache: 'no-store' })
+  if (!idx || !idx.ok) throw new Error('html ' + (idx && idx.status))
+  const html = await idx.text()
+  const ready = await commitShell(cache, html)
+  if (!ready) throw new Error('shell assets incomplete')
 }
 
 async function matchAsset(req) {
@@ -59,6 +88,21 @@ async function matchAsset(req) {
     if (hit) return hit
   }
   return null
+}
+
+async function shellReady(cache) {
+  const htmlRes = await cache.match(SCOPE_PATH)
+  if (!htmlRes) return false
+  try {
+    const html = await htmlRes.clone().text()
+    const critical = assetUrlsFromHtml(html).filter(isCriticalAsset)
+    for (const path of critical) {
+      if (!(await cache.match(path))) return false
+    }
+    return critical.length > 0
+  } catch {
+    return false
+  }
 }
 
 self.addEventListener('install', (event) => {
@@ -79,10 +123,9 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE)
-      const hasShell = !!(await cache.match(SCOPE_PATH))
-      // Старые кэши не трогаем, пока новый shell не готов — иначе Android PWA
-      // открывает старый HTML без JS (бесконечная «Загрузка»).
-      if (hasShell) {
+      // Старые кэши не трогаем, пока новый shell+JS не готов — иначе Pixel PWA
+      // открывает новый HTML без скриптов (вечная синяя заставка).
+      if (await shellReady(cache)) {
         const keys = await caches.keys()
         await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
       }
@@ -112,31 +155,24 @@ self.addEventListener('fetch', (event) => {
         const cache = await caches.open(CACHE)
         const cached = await cache.match(SCOPE_PATH)
 
-        const network = fetch(req, { cache: 'no-store' })
+        // Фоновое обновление: HTML в кэш только вместе с ассетами
+        const networkUpdate = fetchWithTimeout(SCOPE_PATH, 10000, { cache: 'no-store' })
           .then(async (fresh) => {
             if (fresh && fresh.ok) {
               const html = await fresh.clone().text()
-              await putHtml(cache, html)
-              // докачать ассеты нового билда в фоне
-              assetUrlsFromHtml(html).forEach((path) => {
-                fetch(path, { cache: 'no-store' })
-                  .then((r) => (r.ok ? cache.put(path, r) : null))
-                  .catch(() => {})
-              })
+              await commitShell(cache, html)
             }
             return fresh
           })
           .catch(() => null)
 
-        // Есть кэш — сразу показываем (заставка), сеть обновляет в фоне.
-        // Нет кэша — ждём сеть, но не дольше 8с.
         if (cached) {
-          network.catch(() => {})
+          networkUpdate.catch(() => {})
           return cached
         }
 
         const raced = await Promise.race([
-          network,
+          networkUpdate,
           new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
         ])
         if (raced && raced.ok) return raced
@@ -160,29 +196,30 @@ self.addEventListener('fetch', (event) => {
   ) {
     event.respondWith(
       (async () => {
+        const cached = await matchAsset(req)
         try {
-          const fresh = await fetch(req, { cache: 'no-store' })
+          const fresh = await fetchWithTimeout(req.url, 6000, { cache: 'no-store' })
           if (fresh && fresh.ok) {
             const cache = await caches.open(CACHE)
             cache.put(req, fresh.clone())
+            return fresh
           }
-          return fresh
         } catch {
-          return (await matchAsset(req)) || Response.error()
+          /* fallback cache */
         }
+        return cached || Response.error()
       })(),
     )
     return
   }
 
-  // JS/CSS: сначала кэш (быстрый cold start PWA), потом сеть
+  // JS/CSS: сначала кэш (быстрый cold start PWA), потом сеть с таймаутом
   if (url.pathname.includes('/assets/') || url.pathname.endsWith('college-logo.jpg')) {
     event.respondWith(
       (async () => {
         const cached = await matchAsset(req)
         if (cached) {
-          // фоновое обновление той же URL (обычно immutable hash — no-op)
-          fetch(req)
+          fetchWithTimeout(req.url, 8000)
             .then(async (fresh) => {
               if (fresh && fresh.ok) {
                 const cache = await caches.open(CACHE)
@@ -193,7 +230,7 @@ self.addEventListener('fetch', (event) => {
           return cached
         }
         try {
-          const fresh = await fetch(req)
+          const fresh = await fetchWithTimeout(req.url, 8000)
           if (fresh && fresh.ok) {
             const cache = await caches.open(CACHE)
             cache.put(req, fresh.clone())
@@ -213,7 +250,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     (async () => {
       try {
-        return await fetch(req)
+        return await fetchWithTimeout(req.url, 10000)
       } catch {
         return (await matchAsset(req)) || new Response('Нет сети', { status: 503 })
       }
