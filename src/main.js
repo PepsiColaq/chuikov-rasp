@@ -72,6 +72,10 @@ import {
   getFormationDay,
   setFormationCancelled,
   setFormationMark,
+  listAdmins,
+  addAdmin,
+  revokeAdmin,
+  newStudentCode,
 } from './lib/journal.js'
 import { renderGradesTab, renderJournalOverlay } from './journal-ui.js'
 import { supabaseConfigured, supabase, storageUrlCandidates, fetchStorageObjectUrl } from './lib/supabase.js'
@@ -103,7 +107,11 @@ const state = {
   adminCodeEditId: '',
   /** id кода с подтверждением отзыва в карточке */
   adminCodeRevokeId: '',
-  /** Раскрытые секции админки (как ДЗ): codes | support | site | audit | groups | stats */
+  /** id доп. админа с подтверждением отзыва в карточке */
+  adminRemoveId: '',
+  /** Последний выданный админ-код — переживает перерисовку панели */
+  adminIssuedNote: '',
+  /** Раскрытые секции админки (как ДЗ): codes | admins | support | site | audit | groups | stats */
   adminOpen: new Set(),
   /** id секции, у которой идёт анимация раскрытия */
   adminExpandAnimId: null,
@@ -4288,6 +4296,187 @@ function renderAdminPanel() {
   paintCodes()
   } else {
     box.append(wrapAdminAcc('codes', 'Коды', null))
+  }
+
+  // —— Админы (спойлер)
+  // Коды старост живут отдельно: здесь только полный доступ к админке.
+  if (isAdminSectionOpen('admins')) {
+    const mainNote = el('p', {
+      className: 'muted',
+      style: 'margin:0 0 10px;font-size:13px',
+      text: 'Главный админ: загружаем…',
+    })
+    const adminCode = el('input', {
+      maxlength: '64',
+      placeholder: 'Код нового админа (от 8 символов)',
+      autocomplete: 'off',
+    })
+    const adminLabel = el('input', {
+      maxlength: '64',
+      placeholder: 'Кобзева',
+      autocomplete: 'off',
+    })
+    const adminIssued = el('p', {
+      className: 'muted',
+      text: state.adminIssuedNote || '',
+    })
+    const addForm = el('form', {})
+    addForm.append(
+      el('p', {
+        className: 'muted',
+        text: 'Доп. админ видит эту панель целиком. Коды старост при этом не меняются — их отзывают в разделе «Коды».',
+      }),
+      el('div', { className: 'field' }, [el('label', { text: 'Код' }), adminCode]),
+      el('div', { className: 'field' }, [el('label', { text: 'Имя' }), adminLabel]),
+      el('div', { className: 'code-card-btns' }, [
+        el('button', { type: 'submit', className: 'btn', text: 'Добавить админа' }),
+        el('button', {
+          type: 'button',
+          className: 'btn secondary',
+          text: 'Случайный',
+          onClick: () => {
+            adminCode.value = newStudentCode()
+            adminCode.focus()
+          },
+        }),
+      ]),
+      adminIssued,
+    )
+    addForm.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const plain = adminCode.value.trim()
+      const name = adminLabel.value.trim()
+      if (plain.length < 8) {
+        flash('Код от 8 символов', true)
+        return
+      }
+      if (!name) {
+        flash('Укажи имя админа', true)
+        return
+      }
+      try {
+        await addAdmin(plain, name)
+        state.adminIssuedNote = `Готово. ${name} — админ. Код: ${plain}`
+        flash(`Админ добавлен · ${name}`)
+        adminCode.value = ''
+        adminLabel.value = ''
+        paintAdmins()
+      } catch (err) {
+        flash(err.message, true)
+      }
+    })
+
+    const adminsBox = el('div', { className: 'code-list' })
+    async function paintAdmins() {
+      adminsBox.replaceChildren()
+      try {
+        const data = await listAdmins()
+        mainNote.textContent = `Главный админ: ${data.main}. Его код лежит в app_meta — отозвать отсюда нельзя, меняется SQL-запросом.`
+        const rows = (data.extra || []).filter((a) => a.active !== false)
+        if (!rows.length) {
+          adminsBox.append(el('p', { className: 'muted', text: 'Доп. админов пока нет.' }))
+          return
+        }
+        const ids = new Set(rows.map((r) => r.id))
+        if (state.adminRemoveId && !ids.has(state.adminRemoveId)) state.adminRemoveId = ''
+        adminsBox.append(
+          el('h3', { style: 'margin:12px 0 4px;font-size:15px', text: 'Доп. админы' }),
+        )
+        for (const row of rows) {
+          const confirmRemove = state.adminRemoveId === row.id
+          const card = el('article', {
+            className: `code-card${confirmRemove ? ' is-revoking' : ''}`,
+          })
+          const codeText = (row.code || '').trim()
+          card.append(
+            el('div', { className: 'code-card-head' }, [
+              el('strong', { className: 'code-card-group', text: row.label || 'без имени' }),
+              el('span', { className: 'more-role-badge', text: 'админ' }),
+            ]),
+            el('div', {
+              className: codeText ? 'code-card-code' : 'code-card-code is-empty',
+              text: codeText || 'код не сохранён — выдайте новый',
+            }),
+          )
+          if (confirmRemove) {
+            card.append(
+              el('div', { className: 'code-card-revoke' }, [
+                el('p', {
+                  className: 'code-card-revoke-msg',
+                  text: 'Отозвать админа? Сессия закроется сразу, код перестанет пускать.',
+                }),
+                el('div', { className: 'code-card-btns' }, [
+                  el('button', {
+                    type: 'button',
+                    className: 'btn code-card-danger',
+                    text: 'Да, отозвать',
+                    onClick: async () => {
+                      try {
+                        await revokeAdmin(row.id)
+                        flash('Админ отозван')
+                        state.adminRemoveId = ''
+                        paintAdmins()
+                      } catch (err) {
+                        flash(err.message, true)
+                      }
+                    },
+                  }),
+                  el('button', {
+                    type: 'button',
+                    className: 'btn secondary',
+                    text: 'Отмена',
+                    onClick: () => {
+                      state.adminRemoveId = ''
+                      paintAdmins()
+                    },
+                  }),
+                ]),
+              ]),
+            )
+          } else {
+            const btns = [
+              el('button', {
+                type: 'button',
+                className: 'btn secondary',
+                text: 'Отозвать',
+                onClick: () => {
+                  state.adminRemoveId = row.id
+                  paintAdmins()
+                },
+              }),
+            ]
+            if (codeText) {
+              btns.unshift(
+                el('button', {
+                  type: 'button',
+                  className: 'btn secondary',
+                  text: 'Копировать',
+                  onClick: async () => {
+                    try {
+                      await navigator.clipboard.writeText(codeText)
+                      flash('Код скопирован')
+                    } catch {
+                      flash(codeText)
+                    }
+                  },
+                }),
+              )
+            }
+            card.append(el('div', { className: 'code-card-btns' }, btns))
+          }
+          adminsBox.append(card)
+        }
+      } catch (err) {
+        adminsBox.append(el('p', { className: 'muted', text: err.message }))
+      }
+    }
+
+    box.append(
+      wrapAdminAcc('admins', 'Админы', [mainNote, addForm, adminsBox]),
+    )
+    paintAdmins()
+  } else {
+    box.append(wrapAdminAcc('admins', 'Админы', null))
   }
 
   // —— Группы (спойлер)

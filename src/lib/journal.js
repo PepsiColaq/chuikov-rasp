@@ -194,6 +194,46 @@ export async function listMyMarks() {
   return Array.isArray(rows) ? rows : []
 }
 
+/* ── Роли и дополнительные админы ──────────────────────────────── */
+
+/** Поставить роль студенту: 'student' | 'starosta' | 'teacher'. */
+export async function setStudentRole(studentId, role) {
+  const session = getSession()
+  return rpc('rasp_set_student_role', {
+    p_token: session.token,
+    p_student_id: studentId,
+    p_role: role,
+  })
+}
+
+/** { main: 'Имя', extra: [{ id, label, code, active, createdAt }] } */
+export async function listAdmins() {
+  const session = getSession()
+  const data = await rpc('rasp_list_admins', { p_token: session.token })
+  const payload = data || {}
+  return {
+    main: payload.main || 'Админ',
+    extra: Array.isArray(payload.extra) ? payload.extra : [],
+  }
+}
+
+export async function addAdmin(code, label) {
+  const session = getSession()
+  return rpc('rasp_add_admin', {
+    p_token: session.token,
+    p_code: code,
+    p_label: label,
+  })
+}
+
+export async function revokeAdmin(adminId) {
+  const session = getSession()
+  return rpc('rasp_revoke_admin', {
+    p_token: session.token,
+    p_admin_id: adminId,
+  })
+}
+
 export function newStudentCode() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
   const buf = new Uint8Array(10)
