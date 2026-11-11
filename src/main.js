@@ -93,6 +93,10 @@ const splashStartedAt =
 
 const state = {
   tab: 'home',
+  /** Подрежим вкладки «Учёба»: 'grades' — журнал и оценки, 'hw' — домашка */
+  studyMode: 'grades',
+  /** Подэкран профиля: '' — сам профиль, 'overrides' — замены */
+  moreScreen: '',
   groupId: localStorage.getItem(SELECTED_GROUP_KEY) || '',
   day: ((d) => (d === 0 || d === 6 ? 1 : d))(new Date().getDay()),
   weekOffset: 0,
@@ -692,6 +696,7 @@ function renderTop(group) {
           text: 'Войти',
           onClick: () => {
             state.tab = 'more'
+            state.moreScreen = ''
             state.highlightLogin = true
             render()
           },
@@ -703,11 +708,11 @@ function renderTop(group) {
 function tabLeadText(tab, group) {
   if (tab === 'home') return 'Главная'
   if (tab === 'schedule') return 'Пары'
-  if (tab === 'grades') return 'Оценки'
-  if (tab === 'overrides') return 'Замены'
-  if (tab === 'more') return 'Профиль и настройки'
+  if (tab === 'grades') return state.studyMode === 'hw' ? 'Домашнее задание' : 'Журнал и оценки'
+  if (tab === 'more') return state.moreScreen === 'overrides' ? 'Замены' : 'Профиль и настройки'
   if (tab === 'teachers') return 'Поиск: преподаватель или аудитория'
   if (tab === 'hw') return 'Домашнее задание'
+  if (tab === 'overrides') return 'Замены'
   return ''
 }
 
@@ -776,7 +781,7 @@ function renderDays() {
               state.daySwap = null
             }
             state.day = d
-            if (state.tab === 'hw' && HW_TAB_BY_DAY) state.hwDaySeek = { notify: true }
+            if (isHwView() && HW_TAB_BY_DAY) state.hwDaySeek = { notify: true }
             if (!refreshTabPanes(['schedule', 'hw'])) render({ force: true })
             else {
               softUpdateNav()
@@ -2316,7 +2321,7 @@ function renderHwTab() {
     panel.append(
       el('div', {
         className: 'empty',
-        text: 'На эту неделю ДЗ нет. Листай ← → или смотри вкладку «Пары».',
+        text: 'На эту неделю ДЗ нет. Листай ← → или смотри вкладку «Расписание».',
       }),
     )
     return panel
@@ -2380,9 +2385,14 @@ function renderHwTab() {
   return panel
 }
 
+/** Открыт ли сейчас список ДЗ (вкладка «Учёба» в режиме «Домашка»). */
+function isHwView() {
+  return state.tab === 'grades' && state.studyMode === 'hw'
+}
+
 function maybeSeekHwDay() {
   // Прыжок к дню — только по явному нажатию на день (notify: true), не при открытии вкладки
-  if (!HW_TAB_BY_DAY || state.tab !== 'hw') {
+  if (!HW_TAB_BY_DAY || !isHwView()) {
     state.hwDaySeek = null
     return
   }
@@ -2391,7 +2401,7 @@ function maybeSeekHwDay() {
   if (!seek || !seek.notify) return
 
   const day = state.day
-  const pane = document.querySelector('#tab-stage .tab-pane[data-tab="hw"]')
+  const pane = document.querySelector('#tab-stage .tab-pane[data-tab="grades"]')
   const block =
     (pane && pane.querySelector(`[data-hw-day="${day}"]`)) ||
     document.querySelector(`[data-hw-day="${day}"]`)
@@ -5048,6 +5058,7 @@ function moreSvg(kind) {
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 19c1.2-3 3.2-4.5 5.5-4.5S13.3 16 14.5 19"/><circle cx="16.5" cy="8.5" r="2.4"/><path d="M14 15.2c1.4-1.2 2.9-1.7 4.8-1.5 1.2.1 2.2.5 3 1.2"/></svg>',
     phone:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><rect x="8" y="3" width="8" height="18" rx="2"/><path d="M11 18h2"/></svg>',
+    swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 8h13M4 8l3-3M4 8l3 3M20 16H7M20 16l-3-3M20 16l-3 3"/></svg>',
     chevron:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>',
   }
@@ -5154,6 +5165,7 @@ function renderCabinetCard(session) {
             text: 'Открыть дневник',
             onClick: () => {
               state.gradesMode = 'current'
+              state.studyMode = 'grades'
               gotoTab('grades', { animate: true })
             },
           }),
@@ -5174,7 +5186,25 @@ function renderCabinetCard(session) {
 
 function renderMore() {
   if (state.legalDoc) return renderLegalDoc(state.legalDoc)
+  if (state.moreScreen === 'overrides') return renderMoreOverrides()
   return MORE_UI_V2 ? renderMoreV2() : renderMoreClassic()
+}
+
+/** Замены внутри профиля — отдельной вкладки больше нет. */
+function renderMoreOverrides() {
+  const group = getGroup(state.groupId)
+  return el('div', { className: 'panel' }, [
+    el('button', {
+      type: 'button',
+      className: 'btn secondary',
+      text: '← Профиль',
+      onClick: () => {
+        state.moreScreen = ''
+        render({ force: true })
+      },
+    }),
+    group ? renderOverridesTab(group) : el('div', { className: 'empty', text: 'Сначала выбери группу.' }),
+  ])
 }
 
 function renderMoreV2() {
@@ -5258,6 +5288,15 @@ function renderMoreV2() {
       title: 'Сменить группу',
       sub: group ? `Сейчас: ${group.name}` : 'Выбрать группу',
       onClick: () => openGroupPicker(),
+    }),
+    moreSettingsRow({
+      icon: 'swap',
+      title: 'Замены',
+      sub: 'Отмены и переносы пар',
+      onClick: () => {
+        state.moreScreen = 'overrides'
+        render({ force: true })
+      },
     }),
   ]
 
@@ -5820,7 +5859,7 @@ const NAV_ICONS = {
   schedule:
     '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M8 3.5v3M16 3.5v3M4 10h16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
   grades:
-    '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h10a2 2 0 0 1 2 2V20l-7-3-7 3V5.5a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M9 9h6M9 12.5h4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6.5C10.3 5.2 8.3 4.7 5.5 5v13c2.8-.3 4.8.2 6.5 1.5 1.7-1.3 3.7-1.8 6.5-1.5V5c-2.8-.3-4.8.2-6.5 1.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M12 6.5v13" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>',
   hw:
     '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8a2 2 0 0 1 2 2v14H6V6a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M9 2.5h6v3H9z" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M9 11h6M9 15h4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
   teachers:
@@ -5828,18 +5867,16 @@ const NAV_ICONS = {
   overrides:
     '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M3.8 18.5c1-2.4 2.5-3.6 5.2-3.6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><circle cx="15.5" cy="8.2" r="2.4" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M12.2 18.5c.9-2.2 2.3-3.3 4.8-3.3 1.2 0 2.2.3 3 .8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
   more:
-    '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6.5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="17.5" cy="12" r="1.6" fill="currentColor"/></svg>',
+    '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M5 20c1.5-3.5 3.8-5.2 7-5.2s5.5 1.7 7 5.2" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
 }
 
 function renderNav() {
   const items = [
     { id: 'home', label: 'Главная' },
-    { id: 'schedule', label: 'Пары' },
-    { id: 'grades', label: 'Оценки' },
-    { id: 'hw', label: 'ДЗ' },
+    { id: 'schedule', label: 'Расписание' },
+    { id: 'grades', label: 'Учёба' },
     { id: 'teachers', label: 'Поиск' },
-    { id: 'overrides', label: 'Замены' },
-    { id: 'more', label: 'Ещё' },
+    { id: 'more', label: 'Профиль' },
   ]
   return el(
     'nav',
@@ -5864,7 +5901,7 @@ function renderNav() {
   )
 }
 
-const TAB_ORDER = ['home', 'schedule', 'grades', 'hw', 'teachers', 'overrides', 'more']
+const TAB_ORDER = ['home', 'schedule', 'grades', 'teachers', 'more']
 
 /**
  * Кардинально: все 5 вкладок всегда в DOM (pager).
@@ -5963,22 +6000,25 @@ function renderHome() {
     )
   }
 
-  // —— Быстрые переходы
+  // —— Быстрые переходы (третьим элементом — подрежим «Учёбы», если он нужен)
   const tiles = [
     ['schedule', 'Расписание', 'Все пары на неделю'],
-    ['grades', 'Журнал', 'Оценки и посещаемость'],
-    ['hw', 'Домашка', 'Что задали'],
+    ['grades', 'Журнал', 'Оценки и посещаемость', 'grades'],
+    ['hw', 'Домашка', 'Что задали', 'hw'],
     ['teachers', 'Поиск', 'Препод или кабинет'],
   ]
   wrap.append(
     el(
       'div',
       { className: 'home-tiles' },
-      tiles.map(([tab, title, sub]) =>
+      tiles.map(([tab, title, sub, studyMode]) =>
         el('button', {
           type: 'button',
           className: 'home-tile',
-          onClick: () => gotoTab(tab, { animate: true }),
+          onClick: () => {
+            if (studyMode) state.studyMode = studyMode
+            gotoTab(tab, { animate: true })
+          },
         }, [
           el('span', { className: 'home-tile-title', text: title }),
           el('span', { className: 'home-tile-sub', text: sub }),
@@ -6049,9 +6089,10 @@ function renderTabBody(tabId, group, opts = {}) {
   const wrap = el('div', { className: cascade ? 'tab-pane-inner do-cascade' : 'tab-pane-inner' })
   if (tabId === 'home') wrap.append(renderHome())
   else if (tabId === 'schedule') wrap.append(renderDays(), renderSchedule())
-  else if (tabId === 'grades') wrap.append(renderGradesTab(journalCtx()))
-  else if (tabId === 'hw') wrap.append(renderDays(), renderHwTab())
+  else if (tabId === 'grades') wrap.append(renderStudyTab())
   else if (tabId === 'teachers') wrap.append(renderTeachersTab())
+  // Старые id: панелей для них больше нет, но внутренние вызовы остались рабочими
+  else if (tabId === 'hw') wrap.append(renderDays(), renderHwTab())
   else if (tabId === 'overrides') wrap.append(renderOverridesTab(group || getGroup(state.groupId)))
   else wrap.append(renderMore())
   if (cascade) {
@@ -6059,6 +6100,30 @@ function renderTabBody(tabId, group, opts = {}) {
     wrap.addEventListener('animationend', done, { once: true })
     window.setTimeout(done, 520)
   }
+  return wrap
+}
+
+/** Вкладка «Учёба»: журнал с оценками и домашка — переключатель сверху. */
+function renderStudyTab() {
+  const wrap = el('div', { className: 'study-panel' })
+  const mode = state.studyMode === 'hw' ? 'hw' : 'grades'
+  const chip = (id, label) =>
+    el('button', {
+      type: 'button',
+      className: `chip${mode === id ? ' chip-active' : ''}`,
+      text: label,
+      onClick: () => {
+        if (mode === id) return
+        hapticTap()
+        state.studyMode = id
+        if (id === 'hw' && HW_TAB_BY_DAY) state.hwDaySeek = null
+        if (!refreshTabPanes(['grades'])) render({ force: true })
+        else softUpdateNav()
+      },
+    })
+  wrap.append(el('div', { className: 'due-quick study-switch' }, [chip('grades', 'Журнал'), chip('hw', 'Домашка')]))
+  if (mode === 'hw') wrap.append(renderDays(), renderHwTab())
+  else wrap.append(renderGradesTab(journalCtx()))
   return wrap
 }
 
@@ -6195,13 +6260,23 @@ function buildPersistentPager(group, { cascadeTab = null } = {}) {
   return track
 }
 
+/** Старые id вкладок → актуальные панели пейджера (переходники остались в коде). */
+function paneTabId(tabId) {
+  if (tabId === 'hw') return 'grades'
+  if (tabId === 'overrides') return 'more'
+  return tabId
+}
+
 /** Обновить содержимое вкладок на месте — без уничтожения pager */
-function refreshTabPanes(tabIds) {
+function refreshTabPanes(tabIds, { force = false } = {}) {
   const group = state.groupId ? getGroup(state.groupId) : null
   const track = getPagerTrack()
   if (!track || !group) return false
-  const ids = tabIds || TAB_ORDER
-  for (const tabId of ids) {
+  const ids = (tabIds || TAB_ORDER).map(paneTabId)
+  for (const tabId of [...new Set(ids)]) {
+    // Профиль перерисовываем только когда открыт подэкран замен —
+    // иначе фоновое обновление ДЗ сбросит ввод в формах админки.
+    if (!force && tabId === 'more' && state.moreScreen !== 'overrides') continue
     const pane = track.querySelector(`:scope > .tab-pane[data-tab="${tabId}"]`)
     if (!pane) continue
     clearCascadeAnim(pane)
@@ -6226,7 +6301,7 @@ function softRefreshCurrentTab() {
   }
   softUpdateNav()
   paintFlashSlot()
-  if (state.tab === 'hw') maybeSeekHwDay()
+  if (isHwView()) maybeSeekHwDay()
 }
 
 function redrawAfterData(tabIds = ['hw', 'schedule']) {
@@ -6240,7 +6315,7 @@ function redrawAfterData(tabIds = ['hw', 'schedule']) {
   }
   softUpdateNav()
   paintFlashSlot()
-  if (tabIds.includes('hw') && state.tab === 'hw') maybeSeekHwDay()
+  if (isHwView()) maybeSeekHwDay()
 }
 
 function journalCtx() {
@@ -6276,6 +6351,13 @@ function switchTab(id, { animate = false, fromDrag = false } = {}) {
     return
   }
   if (!id || state.tab === id) {
+    // Уже в профиле, но открыт подэкран замен — вернуть корень профиля
+    if (id === 'more' && state.moreScreen) {
+      state.moreScreen = ''
+      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+      softUpdateNav()
+      return
+    }
     if (fromDrag) softUpdateNav()
     return
   }
@@ -6295,6 +6377,10 @@ function switchTab(id, { animate = false, fromDrag = false } = {}) {
   }
 
   if (id === 'hw' && HW_TAB_BY_DAY) state.hwDaySeek = null
+  // Тап по «Профиль» всегда ведёт в корень профиля, а не в последний подэкран.
+  // Панель при этом надо обновить, иначе останется отрисованный подэкран замен.
+  const leavingProfileScreen = id === 'more' && state.moreScreen !== ''
+  if (id === 'more') state.moreScreen = ''
   state.tab = id
   state.cascade = false
   const i = pagerIndex(id)
@@ -6316,9 +6402,13 @@ function switchTab(id, { animate = false, fromDrag = false } = {}) {
   softUpdateNav()
   resetWindowScroll()
   tabSwitchShieldUntil = Date.now() + 4000
-  if (id === 'hw') {
-    const hwPane = track.querySelector(':scope > .tab-pane[data-tab="hw"]')
-    if (hwPane) hwPane.scrollTop = 0
+  if (leavingProfileScreen && state.tab === 'more') {
+    const pane = track.querySelector(':scope > .tab-pane[data-tab="more"]')
+    if (pane) {
+      clearCascadeAnim(pane)
+      pane.replaceChildren(renderTabBody('more', getGroup(state.groupId), { cascade: false }))
+      pane.scrollTop = 0
+    }
   }
 }
 
@@ -6329,14 +6419,23 @@ function switchTab(id, { animate = false, fromDrag = false } = {}) {
  * вместо только что выбранного режима «аудитория»).
  */
 function gotoTab(tabId, { animate = true } = {}) {
+  // Старые id остались в коде переходов: ДЗ теперь внутри «Учёбы», замены — в профиле
+  if (tabId === 'hw') {
+    state.studyMode = 'hw'
+    tabId = 'grades'
+  } else if (tabId === 'overrides') {
+    state.moreScreen = 'overrides'
+    tabId = 'more'
+  }
   if (!tabId || !TAB_ORDER.includes(tabId)) return
+  const force = tabId === 'more'
   if (state.tab === tabId) {
-    if (!refreshTabPanes([tabId])) render({ force: true })
+    if (!refreshTabPanes([tabId], { force })) render({ force: true })
     softUpdateNav()
     return
   }
   switchTab(tabId, { animate })
-  refreshTabPanes([tabId])
+  refreshTabPanes([tabId], { force })
 }
 
 const swipe = {
@@ -6435,10 +6534,6 @@ function swipeFinish(commitDir) {
     swipe.trackDir = 0
     swipe.baseX = 0
     swipe.busy = false
-    if (state.tab === 'hw') {
-      const hwPane = getPagerTrack()?.querySelector(':scope > .tab-pane[data-tab="hw"]')
-      if (hwPane) hwPane.scrollTop = 0
-    }
   }, ms)
 }
 
@@ -6898,7 +6993,7 @@ async function boot() {
         state.day = appTodayWeekday()
       }
       softRebuildTabPane('schedule')
-      softRebuildTabPane('hw')
+      if (isHwView()) softRebuildTabPane('grades')
       return
     }
     if (state.tab !== 'schedule' || !state.groupId) return
@@ -6955,7 +7050,7 @@ if (PULL_TO_REFRESH && typeof window !== 'undefined' && 'ontouchstart' in window
   const ptrEligible = (target) => {
     if (ptr.refreshing) return false
     if (swipe.active || swipe.dragging || swipe.busy || swipe.trackDir) return false
-    if (state.tab !== 'schedule' && state.tab !== 'hw') return false
+    if (state.tab !== 'schedule' && !isHwView()) return false
     if (!state.groupId || state.legalDoc) return false
     if (isEditingFormNow()) return false
     if (hwLightboxEl) return false
@@ -7204,7 +7299,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=131`, { scope: base })
+    .register(`${base}sw.js?v=132`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
