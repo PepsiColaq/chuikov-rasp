@@ -1038,6 +1038,93 @@ html[data-theme='dark'] .seg button.on {
   align-items: center;
 }
 
+/* ── Оценки: несколько на пару ─────────────────────────────────── */
+
+/* ── Построение: отмена и расход ───────────────────────────────── */
+
+.formation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.formation-actions .btn {
+  flex: 1 1 140px;
+}
+
+.grade-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.grade-pill {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.grade-pill:active {
+  transform: scale(0.94);
+}
+
+.grade-add {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 10px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+}
+
+.grade-add:active {
+  transform: scale(0.94);
+}
+
+.grade-extra {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.grade-picker {
+  display: flex;
+  gap: 8px;
+}
+
+.grade-pick {
+  flex: 1 1 0;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.grade-pick:active {
+  transform: scale(0.96);
+}
+
+.grade-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .journal-extra input,
 .journal-add input {
   flex: 1;
