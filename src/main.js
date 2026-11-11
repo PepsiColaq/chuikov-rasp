@@ -92,7 +92,7 @@ const splashStartedAt =
   typeof performance !== 'undefined' ? performance.now() : Date.now()
 
 const state = {
-  tab: 'schedule',
+  tab: 'home',
   groupId: localStorage.getItem(SELECTED_GROUP_KEY) || '',
   day: ((d) => (d === 0 || d === 6 ? 1 : d))(new Date().getDay()),
   weekOffset: 0,
@@ -701,6 +701,7 @@ function renderTop(group) {
 
 /** Подзаголовок под названием группы — один уровень на всех вкладках */
 function tabLeadText(tab, group) {
+  if (tab === 'home') return 'Главная'
   if (tab === 'schedule') return 'Пары'
   if (tab === 'grades') return 'Оценки'
   if (tab === 'overrides') return 'Замены'
@@ -5814,6 +5815,8 @@ function renderClosedGate() {
 const NAV_WITH_ICONS = true
 
 const NAV_ICONS = {
+  home:
+    '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M9.5 20.5v-6h5v6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>',
   schedule:
     '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M8 3.5v3M16 3.5v3M4 10h16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
   grades:
@@ -5830,6 +5833,7 @@ const NAV_ICONS = {
 
 function renderNav() {
   const items = [
+    { id: 'home', label: 'Главная' },
     { id: 'schedule', label: 'Пары' },
     { id: 'grades', label: 'Оценки' },
     { id: 'hw', label: 'ДЗ' },
@@ -5860,7 +5864,7 @@ function renderNav() {
   )
 }
 
-const TAB_ORDER = ['schedule', 'grades', 'hw', 'teachers', 'overrides', 'more']
+const TAB_ORDER = ['home', 'schedule', 'grades', 'hw', 'teachers', 'overrides', 'more']
 
 /**
  * Кардинально: все 5 вкладок всегда в DOM (pager).
@@ -5878,13 +5882,173 @@ function clearCascadeAnim(root) {
   root.querySelectorAll?.('.do-cascade').forEach((n) => n.classList.remove('do-cascade'))
 }
 
+/**
+ * Главная: фото колледжа, что сейчас/дальше, ДЗ на сегодня, быстрые переходы.
+ * Всё из уже загруженного состояния — ни одного лишнего запроса.
+ */
+function renderHome() {
+  const group = state.groupId ? getGroup(state.groupId) : null
+  const wrap = el('div', { className: 'panel home-panel' })
+  const base = import.meta.env.BASE_URL || '/chuikov-rasp/'
+
+  // —— Шапка с фотографией фасада
+  wrap.append(
+    el('section', { className: 'home-hero' }, [
+      el('img', {
+        className: 'home-hero-img',
+        src: `${base}hero-1200.jpg`,
+        srcset: `${base}hero-800.jpg 800w, ${base}hero-1200.jpg 1200w`,
+        sizes: '(max-width: 520px) 100vw, 820px',
+        alt: 'Колледж имени В. И. Чуйкова',
+        loading: 'eager',
+        decoding: 'async',
+      }),
+      el('div', { className: 'home-hero-veil', 'aria-hidden': 'true' }),
+      el('div', { className: 'home-hero-text' }, [
+        el('p', { className: 'home-hero-kicker', text: getSemesterLabel() }),
+        el('h2', { className: 'home-hero-title', text: 'Колледж Чуйкова' }),
+        group
+          ? el('button', {
+              type: 'button',
+              className: 'home-hero-group',
+              text: `${group.name} · сменить`,
+              onClick: () => openGroupPicker(),
+            })
+          : null,
+      ]),
+    ]),
+  )
+
+  if (!group) {
+    wrap.append(
+      el('div', { className: 'card' }, [
+        el('h3', { text: 'Сначала выбери группу' }),
+        el('p', { className: 'muted', text: 'Без группы не показать расписание и ДЗ.' }),
+        el('button', {
+          type: 'button',
+          className: 'btn',
+          text: 'Выбрать группу',
+          onClick: () => openGroupPicker(),
+        }),
+      ]),
+    )
+    return wrap
+  }
+
+  // —— Что сейчас и что дальше
+  const today = todayISO()
+  const todayDay = weekdayFromISO(today)
+  const todayLessons = todayDay ? getLessons(group.id, todayDay) : []
+  const status = getScheduleNowStatus(group.id, today, todayLessons)
+  wrap.append(renderHomeNow(status, group))
+
+  // —— ДЗ на сегодня
+  const hwToday = getHomework(group.id).filter(
+    (h) => !isFormationSkipHw(h) && h.dueDate === today,
+  )
+  if (hwToday.length) {
+    wrap.append(
+      el('div', { className: 'card home-hw' }, [
+        el('div', { className: 'home-card-head' }, [
+          el('h3', { text: 'Сдать сегодня' }),
+          el('span', { className: 'muted', text: String(hwToday.length) }),
+        ]),
+        ...hwToday.slice(0, 4).map((h) =>
+          el('div', { className: 'home-hw-row' }, [
+            el('strong', { text: h.subject || 'Предмет' }),
+            h.text ? el('span', { className: 'muted', text: shortSubjectLabel(h.text, 70) }) : null,
+          ]),
+        ),
+      ]),
+    )
+  }
+
+  // —— Быстрые переходы
+  const tiles = [
+    ['schedule', 'Расписание', 'Все пары на неделю'],
+    ['grades', 'Журнал', 'Оценки и посещаемость'],
+    ['hw', 'Домашка', 'Что задали'],
+    ['teachers', 'Поиск', 'Препод или кабинет'],
+  ]
+  wrap.append(
+    el(
+      'div',
+      { className: 'home-tiles' },
+      tiles.map(([tab, title, sub]) =>
+        el('button', {
+          type: 'button',
+          className: 'home-tile',
+          onClick: () => gotoTab(tab, { animate: true }),
+        }, [
+          el('span', { className: 'home-tile-title', text: title }),
+          el('span', { className: 'home-tile-sub', text: sub }),
+        ]),
+      ),
+    ),
+  )
+
+  return wrap
+}
+
+/** Карточка «идёт сейчас / следующая пара / на сегодня всё». */
+function renderHomeNow(status, group) {
+  if (!status) {
+    return el('div', { className: 'card home-now' }, [
+      el('p', { className: 'home-now-label muted', text: 'Сегодня' }),
+      el('h3', { className: 'home-now-title', text: 'Пар нет' }),
+    ])
+  }
+  if (status.kind === 'done') {
+    return el('div', { className: 'card home-now is-done' }, [
+      el('p', { className: 'home-now-label muted', text: 'Сегодня' }),
+      el('h3', { className: 'home-now-title', text: 'Пары закончились' }),
+      el('p', { className: 'muted', style: 'margin:4px 0 0', text: 'Хорошего вечера.' }),
+    ])
+  }
+  const isNow = status.kind === 'now'
+  const lesson = status.lesson
+  const view = status.view
+  const subject = view?.effectiveSubject || lesson.subject
+  const room = view?.effectiveRoom || (lesson.remote ? 'дистанционно' : '')
+  const meta = [
+    lesson.start && lesson.end ? `${lesson.start}–${lesson.end}` : '',
+    room ? `ауд. ${room}` : '',
+    lesson.teacher || '',
+  ].filter(Boolean).join(' · ')
+
+  return el('div', { className: `card home-now${isNow ? ' is-live' : ''}` }, [
+    el('p', {
+      className: 'home-now-label',
+      text: isNow ? 'Идёт сейчас' : 'Следующая пара',
+    }),
+    el('h3', { className: 'home-now-title', text: subject }),
+    el('p', { className: 'home-now-meta muted', text: meta }),
+    el('p', {
+      className: 'home-now-timer',
+      text: isNow
+        ? `осталось ${status.minsLeft} мин`
+        : `через ${status.minsUntil} мин`,
+    }),
+    el('button', {
+      type: 'button',
+      className: 'btn secondary home-now-btn',
+      text: 'Открыть расписание',
+      onClick: () => {
+        state.day = Number(lesson.day) || state.day
+        gotoTab('schedule', { animate: true })
+      },
+    }),
+  ])
+}
+
 function renderTabBody(tabId, group, opts = {}) {
   const consumeCascade = opts.cascade === undefined
   const wantCascade = consumeCascade ? state.cascade : !!opts.cascade
   if (consumeCascade) state.cascade = false
   const cascade = wantCascade && motionOk()
   const wrap = el('div', { className: cascade ? 'tab-pane-inner do-cascade' : 'tab-pane-inner' })
-  if (tabId === 'schedule') wrap.append(renderDays(), renderSchedule())
+  if (tabId === 'home') wrap.append(renderHome())
+  else if (tabId === 'schedule') wrap.append(renderDays(), renderSchedule())
   else if (tabId === 'grades') wrap.append(renderGradesTab(journalCtx()))
   else if (tabId === 'hw') wrap.append(renderDays(), renderHwTab())
   else if (tabId === 'teachers') wrap.append(renderTeachersTab())
@@ -7040,7 +7204,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=130`, { scope: base })
+    .register(`${base}sw.js?v=131`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
