@@ -1090,6 +1090,28 @@ export function canUseFreeRooms(session = getSession()) {
   return !!session.canFreeRooms
 }
 
+/** Сколько секунд ещё нельзя входить (0 — не заблокировано/миграция не применена). */
+export async function fetchLoginWaitSeconds() {
+  if (!supabaseConfigured || !supabase) return 0
+  try {
+    const { data, error } = await withTimeout(supabase.rpc('rasp_login_wait'), 6000, 'таймера входа')
+    if (error) return 0
+    let payload = data
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload)
+      } catch {
+        return 0
+      }
+    }
+    if (Array.isArray(payload)) payload = payload[0]
+    const sec = Number(payload?.seconds ?? payload?.Seconds ?? 0)
+    return Number.isFinite(sec) && sec > 0 ? Math.ceil(sec) : 0
+  } catch {
+    return 0
+  }
+}
+
 export async function logout() {
   const s = getSession()
   if (s?.token && supabaseConfigured) {
@@ -1293,6 +1315,16 @@ export async function loginWithCode(code, groupIdHint = null, who = '') {
           throw lastErr
         }
         if (!/неверный код/i.test(studentMsg)) throw studentErr
+      }
+    }
+    if (lastErr && /подождите|слишком много попыток/i.test(String(lastErr.message || ''))) {
+      const left = await fetchLoginWaitSeconds()
+      if (left > 0) {
+        throw new Error(
+          left >= 60
+            ? `Слишком много попыток. Подождите ~${Math.ceil(left / 60)} мин.`
+            : `Слишком много попыток. Подождите ${left} с.`,
+        )
       }
     }
     throw lastErr || new Error('Не удалось войти')
