@@ -216,6 +216,37 @@ async function closeAllTickets(store) {
   return Math.max(n, localOpen)
 }
 
+async function flushPendingReplies() {
+  if (!SB_URL || !SB_KEY) return 0
+  let rows = []
+  try {
+    rows =
+      (await sb(
+        'support_tickets?pending_send=eq.true&select=id,tg_user_id,answer&limit=40',
+      )) || []
+  } catch {
+    return 0
+  }
+  let n = 0
+  for (const t of rows) {
+    const text = (t.answer || '').trim()
+    if (!text || !t.tg_user_id) continue
+    const r = await tg('sendMessage', {
+      chat_id: t.tg_user_id,
+      text: `Ответ поддержки:\n${text}`.slice(0, 4000),
+    })
+    if (r.ok) {
+      await sb(`support_tickets?id=eq.${encodeURIComponent(t.id)}`, {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: { pending_send: false, status: 'answered' },
+      })
+      n++
+    }
+  }
+  return n
+}
+
 function clampIndex(store, total) {
   if (total <= 0) {
     store.adminIndex = 0
@@ -419,8 +450,16 @@ async function handleMessage(store, adminId, msg) {
 async function once() {
   const store = loadStore()
   const adminId = ADMIN
-  await tg('deleteWebhook', { drop_pending_updates: false }).catch(() => {})
+  // Do NOT deleteWebhook here — production uses Cloudflare webhook.
 
+  try {
+    const sent = await flushPendingReplies()
+    if (sent) console.log('flushed replies', sent)
+  } catch (e) {
+    console.error('flush', e.message || e)
+  }
+
+  // If webhook is set, getUpdates will fail with 409 — that's OK for GH Actions backup.
   let offset = store.offset || 0
   const updates = await tg('getUpdates', {
     offset: offset || undefined,
@@ -428,6 +467,10 @@ async function once() {
     allowed_updates: ['message'],
   })
   if (!updates.ok) {
+    if (updates.error_code === 409) {
+      console.log('webhook active — skip getUpdates, flushed pending only')
+      return
+    }
     console.error(updates)
     return
   }

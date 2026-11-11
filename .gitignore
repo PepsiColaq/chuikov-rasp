@@ -5,3 +5,5 @@ dist
 .env
 .env.*
 !.env.example
+scripts/.tg-support-store.json
+scripts/.tg-webhook-secret.txt

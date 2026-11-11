@@ -23,7 +23,7 @@ export const CODE_HASHES = codeHashes
 export const SEMESTER_LABEL = schedule.semesterLabel || '2026–2027 · 1 полугодие'
 export const SCHEDULE_GROUPS = schedule.groups
 export const SCHEDULE_LESSONS = schedule.lessons
-export const DEFAULT_GROUP_NAME = '0903-ПД3'
+export const DEFAULT_GROUP_NAME = ''
 
 export function facultyFromName(name) {
   const n = name.toUpperCase()
