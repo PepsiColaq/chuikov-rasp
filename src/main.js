@@ -5222,7 +5222,10 @@ function renderMoreV2() {
         renderProfileAvatarControls(session),
       ]),
     )
-    panel.append(renderCabinetCard(session))
+    // У админа и кода старосты кабинета нет — renderCabinetCard вернёт null.
+    // append(null) вставил бы в DOM текстовую строку «null», поэтому проверяем.
+    const cabinet = renderCabinetCard(session)
+    if (cabinet) panel.append(cabinet)
   }
 
   const themeIco = moreThemeIcon(isDark)
@@ -7037,7 +7040,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=129`, { scope: base })
+    .register(`${base}sw.js?v=130`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
