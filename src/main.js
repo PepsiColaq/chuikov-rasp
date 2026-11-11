@@ -79,6 +79,7 @@ import {
   addAdmin,
   revokeAdmin,
   newStudentCode,
+  listMyMarks,
 } from './lib/journal.js'
 import { renderGradesTab, renderJournalOverlay } from './journal-ui.js'
 import { supabaseConfigured, supabase, storageUrlCandidates, fetchStorageObjectUrl } from './lib/supabase.js'
@@ -5086,6 +5087,92 @@ function moreSettingsRow({ icon, title, sub, onClick, leading }) {
   )
 }
 
+/**
+ * Личный кабинет: сводка по своим оценкам и пропускам.
+ * Данные те же, что в дневнике (rasp_my_marks) — отдельного запроса нет.
+ */
+function renderCabinetCard(session) {
+  if (!session || session.role === 'admin') return null
+  // Дневник есть только у реального студента: его id начинается с 'st_',
+  // у кода старосты группы в codeId лежит 'gc_…' — там сводки нет.
+  const isStudent =
+    session.role === 'student' || String(session.codeId || '').startsWith('st_')
+  if (!isStudent) return null
+
+  const box = el('div', { className: 'card cabinet-card' })
+  const body = el('div', { className: 'cabinet-body', text: 'Считаем…' })
+  box.append(
+    el('div', { className: 'cabinet-head' }, [
+      el('h3', { text: 'Личный кабинет' }),
+      el('span', { className: 'muted', text: session.label || '' }),
+    ]),
+    body,
+  )
+
+  listMyMarks()
+    .then((rows) => {
+      const list = Array.isArray(rows) ? rows : []
+      if (!list.length) {
+        body.replaceChildren(
+          el('p', {
+            className: 'muted',
+            style: 'margin:0',
+            text: 'Пока нет оценок и отметок о пропусках.',
+          }),
+        )
+        return
+      }
+      const grades = list
+        .map((r) => Number(r.grade))
+        .filter((n) => Number.isFinite(n) && n >= 2 && n <= 5)
+      const avg = grades.length
+        ? (grades.reduce((a, b) => a + b, 0) / grades.length).toFixed(2)
+        : '—'
+      const absent = list.filter((r) => {
+        const att = String(r.attendance || '')
+        return att && att !== 'present'
+      }).length
+      const subjects = new Set(list.map((r) => String(r.subject || '').trim()).filter(Boolean))
+
+      const stat = (value, caption, tone) =>
+        el('div', { className: `cabinet-stat${tone ? ` is-${tone}` : ''}` }, [
+          el('strong', { text: String(value) }),
+          el('span', { text: caption }),
+        ])
+
+      body.replaceChildren(
+        el('div', { className: 'cabinet-stats' }, [
+          stat(avg, 'средний балл', 'avg'),
+          stat(grades.length, 'оценок'),
+          stat(absent, 'пропусков', absent ? 'bad' : ''),
+          stat(subjects.size, 'предметов'),
+        ]),
+        el('div', { className: 'cabinet-actions' }, [
+          el('button', {
+            type: 'button',
+            className: 'btn secondary',
+            text: 'Открыть дневник',
+            onClick: () => {
+              state.tab = 'grades'
+              state.gradesMode = 'current'
+              render({ force: true })
+            },
+          }),
+        ]),
+      )
+    })
+    .catch((err) => {
+      body.replaceChildren(
+        el('p', {
+          className: 'muted',
+          style: 'margin:0',
+          text: err?.message || 'Не удалось загрузить сводку.',
+        }),
+      )
+    })
+  return box
+}
+
 function renderMore() {
   if (state.legalDoc) return renderLegalDoc(state.legalDoc)
   return MORE_UI_V2 ? renderMoreV2() : renderMoreClassic()
@@ -5137,6 +5224,7 @@ function renderMoreV2() {
         renderProfileAvatarControls(session),
       ]),
     )
+    panel.append(renderCabinetCard(session))
   }
 
   const themeIco = moreThemeIcon(isDark)
