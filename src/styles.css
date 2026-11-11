@@ -900,12 +900,31 @@ html[data-theme='dark'] .now-strip-bar {
 
 .journal-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  gap: 6px 10px;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'num person more'
+    '. controls controls';
+  gap: 8px 10px;
   align-items: center;
   padding: 12px 0;
   border-top: 1px solid var(--line);
   background: transparent;
+}
+
+.journal-row > .journal-num {
+  grid-area: num;
+}
+
+.journal-row > .journal-person {
+  grid-area: person;
+}
+
+.journal-row > .journal-more-btn {
+  grid-area: more;
+}
+
+.journal-row > .journal-controls {
+  grid-area: controls;
 }
 
 .journal-num {
@@ -942,8 +961,10 @@ html[data-theme='dark'] .now-strip-bar {
 
 .journal-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .seg {
@@ -958,10 +979,10 @@ html[data-theme='dark'] .now-strip-bar {
   border: 0;
   border-right: 1px solid var(--line);
   background: transparent;
-  min-width: 42px;
-  min-height: 42px;
-  padding: 8px 10px;
-  font-size: 16px;
+  min-width: 38px;
+  min-height: 40px;
+  padding: 8px 8px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--muted);
 }
@@ -988,19 +1009,25 @@ html[data-theme='dark'] .seg button.on {
 }
 
 .journal-more-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--muted);
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
+  padding: 0;
 }
 
 .journal-more-btn.on {
   color: var(--accent);
   border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .journal-extra {
@@ -1089,12 +1116,13 @@ html[data-theme='dark'] .seg button.on {
 
 @media (max-width: 640px) {
   .journal-row {
-    grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    gap: 8px;
   }
 
   .journal-controls {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
+    justify-content: space-between;
+    width: 100%;
   }
 }
 
@@ -1793,6 +1821,19 @@ html.hw-lightbox-open {
 .field label {
   font-size: 13px;
   color: var(--muted);
+}
+
+/* Строка «подпись + действие» (например «Код доступа» и «Показать») */
+.field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.login-reveal {
+  font-size: 12px;
+  flex: 0 0 auto;
 }
 
 .field input,
