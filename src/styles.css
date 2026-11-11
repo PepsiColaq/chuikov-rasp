@@ -296,6 +296,25 @@ html[data-theme='dark'] .days button.active {
   cursor: pointer;
 }
 
+.chip-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.role-picker {
+  margin-top: 8px;
+  align-items: center;
+}
+
+.role-picker::before {
+  content: 'Роль';
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
 .due-set-hint {
   margin: 6px 0 0;
   font-size: 13px;

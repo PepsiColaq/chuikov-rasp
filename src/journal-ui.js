@@ -14,6 +14,7 @@ import {
   newStudentCode,
   setOwnStudentCode,
   setStudentCode,
+  setStudentRole,
   upsertMark,
 } from './lib/journal.js'
 import { getSession } from './lib/store.js'
@@ -514,6 +515,12 @@ function renderCodesScreen(ctx, spec, students, reload) {
       }, [
         el('span', { className: 'journal-num', text: String(index + 1) }),
         el('span', { text: personSurname(student) }),
+        student.role && student.role !== 'student'
+          ? el('span', {
+              className: 'journal-tag',
+              text: student.role === 'teacher' ? 'препод' : 'староста',
+            })
+          : null,
         el('span', {
           className: 'muted',
           text: hasCode ? (student.shared ? 'общий' : 'есть') : 'нет',
@@ -555,7 +562,38 @@ function renderCodesScreen(ctx, spec, students, reload) {
           ctx.flash(err.message, true)
         }
       })
-      row.append(form)
+
+      // Роль: повышение даёт права журнала на его же код, раздавать ничего не нужно.
+      const current = String(student.role || 'student')
+      const roleRow = el('div', { className: 'due-quick role-picker' })
+      for (const [id, label] of [
+        ['student', 'Студент'],
+        ['starosta', 'Староста'],
+        ['teacher', 'Препод'],
+      ]) {
+        roleRow.append(
+          el('button', {
+            type: 'button',
+            className: `chip${current === id ? ' chip-active' : ''}`,
+            text: label,
+            onClick: async () => {
+              if (current === id) return
+              try {
+                await setStudentRole(student.id, id)
+                ctx.flash(
+                  id === 'student'
+                    ? `${personSurname(student)} снова студент`
+                    : `${personSurname(student)} — ${label.toLowerCase()}, код уже работает`,
+                )
+                reload()
+              } catch (err) {
+                ctx.flash(err.message, true)
+              }
+            },
+          }),
+        )
+      }
+      row.append(form, roleRow)
     }
     box.append(row)
   })
