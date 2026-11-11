@@ -67,7 +67,12 @@ import { breakMinutes, DAY_NAMES, DAY_SHORT } from './data/seed.js'
   getLocalBanReason,
   refreshDeviceBanStatus,
 } from './lib/store.js'
-import { canGradeGroup } from './lib/journal.js'
+import {
+  canGradeGroup,
+  getFormationDay,
+  setFormationCancelled,
+  setFormationMark,
+} from './lib/journal.js'
 import { renderGradesTab, renderJournalOverlay } from './journal-ui.js'
 import { supabaseConfigured, supabase, storageUrlCandidates, fetchStorageObjectUrl } from './lib/supabase.js'
 import { privacyParagraphs, termsParagraphs } from './lib/legal.js'
@@ -127,6 +132,14 @@ const state = {
   /** current | final */
   gradesMode: 'current',
   gradeTip: '',
+  /** Сторона «+оценка»: какой вид работы выбран */
+  gradeKind: 'answer',
+  /** id студента, у которого открыт выбор оценки */
+  gradeAddFor: '',
+  /** Статус построения на текущий день: { cancelled, note, canEdit, marks } */
+  formationDay: null,
+  /** Открытый экран расхода построения: { groupId, date, formStart, anchorStart } */
+  formationMarks: null,
   message: null,
   error: null,
 }
@@ -1873,14 +1886,12 @@ function resolveFormation(groupId, dateStr, lessons) {
   if (!inPerson.length) {
     return { show: false, reason: 'no_campus' }
   }
-  const skipHw = getHomework(groupId).find(
-    (h) => isFormationSkipHw(h) && h.dueDate === dateStr,
-  )
   const anchor = inPerson[0]
   return {
     show: true,
-    skipped: !!skipHw,
-    skipId: skipHw?.id || null,
+    // Отмену подтягиваем из formation_days асинхронно (см. state.formationDay).
+    skipped: !!state.formationDay?.cancelled,
+    note: state.formationDay?.note || '',
     anchorStart: anchor.start,
     formStart: subtractMinutes(anchor.start, 15),
     anchorSubject: anchor.subject,
@@ -1890,6 +1901,17 @@ function resolveFormation(groupId, dateStr, lessons) {
 function renderFormationCard(groupId, dateStr, formation) {
   if (!formation?.show || !formation.formStart) return null
   const editable = canEdit(groupId)
+
+  const toggle = async (cancelled) => {
+    try {
+      const res = await setFormationCancelled(groupId, dateStr, cancelled, '')
+      state.formationDay = { cancelled: !!res?.cancelled, note: '', canEdit: true, marks: [] }
+      flash(cancelled ? 'Построение отменено на этот день' : 'Построение снова в расписании')
+      render({ force: true })
+    } catch (err) {
+      flash(err.message, true)
+    }
+  }
 
   if (formation.skipped) {
     return el('article', { className: 'lesson lesson-formation cancelled' }, [
@@ -1909,14 +1931,7 @@ function renderFormationCard(groupId, dateStr, formation) {
             className: 'btn secondary',
             style: 'margin-top:10px',
             text: 'Вернуть построение',
-            onClick: async () => {
-              try {
-                if (formation.skipId) await deleteHomework(groupId, formation.skipId)
-                flash('Построение снова в расписании')
-              } catch (err) {
-                flash(err.message, true)
-              }
-            },
+            onClick: () => void toggle(false),
           })
         : null,
     ])
@@ -1934,34 +1949,240 @@ function renderFormationCard(groupId, dateStr, formation) {
       el('div', { className: 'lesson-time', text: formation.formStart }),
     ]),
     editable
-      ? el('button', {
-          type: 'button',
-          className: 'btn secondary',
-          style: 'margin-top:10px',
-          text: 'Отменить построение',
-          onClick: async () => {
-            try {
-              await addHomework(groupId, {
-                subject: FORMATION_SKIP_SUBJECT,
-                text: 'Построение отменено',
-                dueDate: dateStr,
-                lessonId: null,
-                attachments: [],
-              })
-              flash('Построение отменено на этот день')
-            } catch (err) {
-              flash(err.message, true)
-            }
-          },
-        })
+      ? el('div', { className: 'formation-actions' }, [
+          el('button', {
+            type: 'button',
+            className: 'btn secondary',
+            style: 'margin-top:10px',
+            text: 'Отменить построение',
+            onClick: () => void toggle(true),
+          }),
+          el('button', {
+            type: 'button',
+            className: 'btn',
+            style: 'margin-top:10px',
+            text: 'Расход построения',
+            onClick: () => {
+              state.formationMarks = {
+                groupId,
+                date: dateStr,
+                formStart: formation.formStart,
+                anchorStart: formation.anchorStart,
+              }
+              render({ force: true })
+            },
+          }),
+        ])
       : null,
   ])
+}
+
+/** Подтянуть статус построения дня (отмена + расход) без блокировки UI. */
+let formationLoadKey = ''
+function loadFormationDay(groupId, dateStr) {
+  const key = `${groupId}|${dateStr}`
+  if (formationLoadKey === key) return
+  formationLoadKey = key
+  const session = getSession()
+  if (!session?.token) {
+    state.formationDay = { cancelled: false, note: '', canEdit: false, marks: [] }
+    return
+  }
+  getFormationDay(groupId, dateStr)
+    .then((day) => {
+      if (formationLoadKey !== key) return
+      const before = state.formationDay?.cancelled
+      state.formationDay = day
+      if (before !== day.cancelled) softRefreshCurrentTab()
+    })
+    .catch(() => {
+      formationLoadKey = ''
+    })
+}
+
+/** Экран расхода построения: явка на построение + текст для чата. */
+function renderFormationMarksOverlay() {
+  const spec = state.formationMarks
+  if (!spec) return null
+  const session = getSession()
+  if (!session?.token) {
+    state.formationMarks = null
+    return null
+  }
+  const group = getGroup(spec.groupId)
+  const close = () => {
+    state.formationMarks = null
+    render({ force: true })
+  }
+
+  const root = el('div', { className: 'journal-overlay' })
+  root.append(
+    el('button', {
+      type: 'button',
+      className: 'journal-backdrop',
+      'aria-label': 'Закрыть',
+      onClick: close,
+    }),
+  )
+  const sheet = el('div', { className: 'journal-sheet' })
+  const head = el('div', { className: 'journal-head' }, [
+    el('button', { type: 'button', className: 'journal-back', text: '← Назад', onClick: close }),
+    el('div', { className: 'journal-head-text' }, [
+      el('p', {
+        className: 'muted journal-kicker',
+        text: `${group?.name || 'Группа'} · ${formatDateRu(spec.date)}`,
+      }),
+      el('h2', { text: 'Расход построения' }),
+      el('p', { className: 'muted', text: `${spec.formStart} · до пары в ${spec.anchorStart}` }),
+    ]),
+  ])
+  const tools = el('div', { className: 'journal-tools' })
+  const list = el('div', { className: 'journal-list', text: 'Загружаем…' })
+  sheet.append(head, tools, list)
+  root.append(sheet)
+
+  const paint = async () => {
+    try {
+      const [students, day] = await Promise.all([
+        listStudents(spec.groupId),
+        getFormationDay(spec.groupId, spec.date),
+      ])
+      if (day.cancelled) {
+        state.formationMarks = null
+        flash('Построение отменено — расхода нет', true)
+        render({ force: true })
+        return
+      }
+      const byStudent = new Map((day.marks || []).map((m) => [m.studentId, m]))
+      paintFormationTools(spec, group, students, byStudent, tools, paint)
+      paintFormationRows(spec, students, byStudent, list, paint)
+    } catch (err) {
+      list.replaceChildren(
+        el('p', {
+          className: 'muted',
+          text: err.message || 'Не удалось открыть расход. Выполни supabase/journal_v2.sql.',
+        }),
+      )
+    }
+  }
+  void paint()
+  return root
+}
+
+function paintFormationTools(spec, group, students, byStudent, tools, reload) {
+  tools.replaceChildren()
+  const links = el('div', { className: 'journal-links' })
+  links.append(
+    el('button', {
+      type: 'button',
+      className: 'journal-link',
+      text: 'Текст расхода',
+      onClick: async () => {
+        const present = students.filter((s) => byStudent.get(s.id)?.attendance === 'present')
+        const absent = students.filter((s) => byStudent.get(s.id)?.attendance === 'absent')
+        const unmarked = students.filter((s) => !byStudent.get(s.id)?.attendance)
+        const lines = [
+          `Построение ${group?.name || ''} · ${formatDateRu(spec.date)}:`,
+          `По списку: ${students.length}`,
+          `На построении: ${present.length}`,
+        ]
+        if (unmarked.length) lines.push(`Не отмечены: ${unmarked.length}`)
+        if (absent.length) {
+          lines.push(`Отсутствуют: ${absent.length}`)
+          for (const s of absent) {
+            const reason = (byStudent.get(s.id)?.comment || '').trim()
+            lines.push(reason ? `${s.surname} (${reason})` : s.surname)
+          }
+        } else {
+          lines.push('Отсутствуют: 0')
+        }
+        const text = lines.join('\n')
+        try {
+          await navigator.clipboard.writeText(text)
+          flash('Текст расхода скопирован')
+        } catch {
+          flash(text)
+        }
+      },
+    }),
+  )
+  tools.append(
+    links,
+    el('p', {
+      className: 'muted journal-hint',
+      text: 'Отмечай только построение. Оценки и пары — в журнале пары.',
+    }),
+  )
+}
+
+function paintFormationRows(spec, students, byStudent, list, reload) {
+  list.replaceChildren()
+  if (!students.length) {
+    list.append(el('p', { className: 'muted', text: 'В этой группе пока нет студентов.' }))
+    return
+  }
+  const repaint = () => paintFormationRows(spec, students, byStudent, list, reload)
+  students.forEach((student, index) => {
+    const mark = byStudent.get(student.id) || { attendance: '', comment: '' }
+    const save = async (attendance) => {
+      const next = attendance === mark.attendance ? '' : attendance
+      byStudent.set(student.id, { ...mark, attendance: next })
+      repaint()
+      try {
+        await setFormationMark(student.id, spec.date, next, mark.comment || '')
+      } catch (err) {
+        byStudent.set(student.id, mark)
+        flash(err.message, true)
+        repaint()
+      }
+    }
+    const seg = el('div', { className: 'seg' })
+    for (const [id, label] of [
+      ['present', '+'],
+      ['absent', 'н'],
+      ['sick', 'б'],
+    ]) {
+      seg.append(
+        el('button', {
+          type: 'button',
+          className: mark.attendance === id ? 'on' : '',
+          text: label,
+          onClick: () => void save(id),
+        }),
+      )
+    }
+    const comment = el('input', {
+      maxlength: '200',
+      placeholder: 'Причина',
+      value: mark.comment || '',
+    })
+    comment.addEventListener('change', async () => {
+      const value = comment.value
+      byStudent.set(student.id, { ...mark, comment: value })
+      try {
+        await setFormationMark(student.id, spec.date, mark.attendance || '', value)
+      } catch (err) {
+        flash(err.message, true)
+      }
+    })
+    list.append(
+      el('article', { className: 'journal-row' }, [
+        el('span', { className: 'journal-num', text: String(index + 1) }),
+        el('div', { className: 'journal-person' }, [
+          el('strong', { text: personSurname(student) }),
+          personRest(student) ? el('span', { className: 'muted', text: personRest(student) }) : null,
+        ]),
+        el('div', { className: 'journal-controls' }, [seg, comment]),
+      ]),
+    )
+  })
 }
 
 function renderSchedule() {
   const group = getGroup(state.groupId)
   const lessons = getLessons(group.id, state.day)
   const dateStr = dateForWeekday(state.day)
+  loadFormationDay(group.id, dateStr)
   const nowStatus = getScheduleNowStatus(group.id, dateStr, lessons)
   const liveId = nowStatus?.kind === 'now' ? nowStatus.lesson?.id : null
   const frag = el('div', { className: daySwapPanelClass('panel') }, [
@@ -5768,6 +5989,8 @@ function render(opts = {}) {
   root.append(renderNav())
   const journal = renderJournalOverlay(journalCtx())
   if (journal) root.append(journal)
+  const formation = renderFormationMarksOverlay()
+  if (formation) root.append(formation)
   maybeSeekHwDay()
 }
 

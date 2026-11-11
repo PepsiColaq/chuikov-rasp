@@ -93,8 +93,98 @@ export async function upsertMark(row) {
     p_end: row.end,
     p_subject: row.subject,
     p_attendance: row.attendance || 'present',
-    p_grade: row.grade == null || row.grade === '' ? 0 : Number(row.grade),
+    p_grade: 0,
     p_comment: row.comment || '',
+  })
+}
+
+/* ── Оценки: несколько на одну пару ─────────────────────────────── */
+
+export const GRADE_KINDS = [
+  ['answer', 'ответ'],
+  ['test', 'тест'],
+  ['independent', 'самост.'],
+  ['project', 'проект'],
+  ['oral', 'устно'],
+  ['other', 'другое'],
+]
+
+/** Все оценки пары: [{ id, studentId, value, kind, comment, author }] */
+export async function listLessonGrades(groupId, date, start, end) {
+  const session = getSession()
+  const rows = await rpc('rasp_lesson_grades', {
+    p_token: session.token,
+    p_group_id: groupId,
+    p_date: date,
+    p_start: start,
+    p_end: end,
+  })
+  return Array.isArray(rows) ? rows : []
+}
+
+export async function addGrade(row) {
+  const session = getSession()
+  return rpc('rasp_add_grade', {
+    p_token: session.token,
+    p_student_id: row.studentId,
+    p_date: row.date,
+    p_lesson_id: row.lessonId || '',
+    p_start: row.start,
+    p_end: row.end,
+    p_subject: row.subject,
+    p_value: Number(row.value),
+    p_kind: row.kind || 'answer',
+    p_comment: row.comment || '',
+  })
+}
+
+export async function deleteGrade(gradeId) {
+  const session = getSession()
+  return rpc('rasp_delete_grade', {
+    p_token: session.token,
+    p_grade_id: gradeId,
+  })
+}
+
+/* ── Построение: явка и отмена ──────────────────────────────────── */
+
+/** { cancelled, note, canEdit, marks: [{ studentId, attendance, comment }] } */
+export async function getFormationDay(groupId, date) {
+  const session = getSession()
+  if (!session?.token) return { cancelled: false, note: '', canEdit: false, marks: [] }
+  const data = await rpc('rasp_formation_day', {
+    p_token: session.token,
+    p_group_id: groupId,
+    p_date: date,
+  })
+  const payload = data || {}
+  return {
+    cancelled: payload.cancelled === true,
+    note: payload.note || '',
+    canEdit: payload.canEdit === true,
+    marks: Array.isArray(payload.marks) ? payload.marks : [],
+  }
+}
+
+export async function setFormationCancelled(groupId, date, cancelled, note = '') {
+  const session = getSession()
+  return rpc('rasp_set_formation_cancelled', {
+    p_token: session.token,
+    p_group_id: groupId,
+    p_date: date,
+    p_cancelled: !!cancelled,
+    p_note: note || '',
+  })
+}
+
+export async function setFormationMark(studentId, date, attendance, comment = '') {
+  const session = getSession()
+  return rpc('rasp_set_formation_mark', {
+    p_token: session.token,
+    p_student_id: studentId,
+    p_date: date,
+    p_attendance: attendance || '',
+    p_comment: comment || '',
   })
 }
 
