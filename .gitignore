@@ -7,3 +7,4 @@ dist
 !.env.example
 scripts/.tg-support-store.json
 scripts/.tg-webhook-secret.txt
+.verify-build

@@ -810,6 +810,72 @@ export function listDayPairSlots(dateStr) {
   return [...map.values()].sort((a, b) => a.start.localeCompare(b.start))
 }
 
+/** Подсказки аудиторий по вводу: «21» → 210, 214… */
+export function suggestRooms(query, limit = 12) {
+  const q = normalizeRoomKey(query)
+  if (!q) return []
+  const all = listScheduleRooms()
+  const starts = all.filter((r) => normalizeRoomKey(r).startsWith(q))
+  const contains = all.filter(
+    (r) => !normalizeRoomKey(r).startsWith(q) && normalizeRoomKey(r).includes(q),
+  )
+  return [...starts, ...contains].slice(0, limit)
+}
+
+/**
+ * Кто в какой аудитории на дату (с учётом замен).
+ * Возвращает все пары этого дня, отфильтрованные по номеру кабинета.
+ * @returns {{ dayNum: number, slots: object[] }}
+ */
+export function findRoomSlots(query, dateStr) {
+  const q = normalizeRoomKey(query)
+  if (!db?.lessons || !q || !dateStr) return { dayNum: 0, slots: [] }
+
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr).slice(0, 10))
+  if (!m) return { dayNum: 0, slots: [] }
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0)
+  const js = dt.getDay()
+  const dayNum = js === 0 ? 7 : js
+  if (dayNum === 7) return { dayNum, slots: [] }
+
+  const groupsById = new Map((db.groups || []).map((g) => [g.id, g]))
+  const slots = []
+
+  for (const lesson of db.lessons) {
+    if (Number(lesson.day) !== dayNum) continue
+    const ovList = getOverridesForDate(lesson.groupId, dateStr)
+    const ov = ovList.find((o) => o.lessonId === lesson.id)
+    const view = resolveLesson(lesson, ov)
+    const room = String(view.effectiveRoom || '').trim()
+    if (!isUsableRoom(room, lesson.remote && !room)) continue
+    const key = normalizeRoomKey(room)
+    // точное совпадение номера или вхождение («210» найдёт «210а»)
+    if (key !== q && !key.includes(q)) continue
+    const group = groupsById.get(lesson.groupId)
+    slots.push({
+      room,
+      start: lesson.start,
+      end: lesson.end,
+      subject: view.effectiveSubject,
+      teacher: String(lesson.teacher || '').trim(),
+      groupName: group?.name || '',
+      groupId: lesson.groupId,
+      cancelled: !!view.cancelled,
+      overrideType: view.overrideType,
+      subjectChanged: view.overrideType === 'subject' || view.overrideType === 'subject_and_room',
+      note: ov?.note || view.note || '',
+      remote: !!lesson.remote && !room,
+    })
+  }
+
+  slots.sort(
+    (a, b) =>
+      a.start.localeCompare(b.start) ||
+      a.groupName.localeCompare(b.groupName, 'ru', { numeric: true }),
+  )
+  return { dayNum, slots }
+}
+
 /**
  * Занятость аудиторий на дату в слоте start–end (с учётом замен).
  * @returns {{ dayNum: number, free: string[], busy: { room: string, lessons: object[] }[] }}
