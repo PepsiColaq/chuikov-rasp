@@ -803,8 +803,7 @@ function roomLink(room) {
       state.teacherMode = 'room'
       state.roomQuery = value
       state.roomDate = todayISO()
-      state.tab = 'teachers'
-      render({ force: true })
+      gotoTab('teachers', { animate: true })
     },
   })
 }
@@ -5153,9 +5152,8 @@ function renderCabinetCard(session) {
             className: 'btn secondary',
             text: 'Открыть дневник',
             onClick: () => {
-              state.tab = 'grades'
               state.gradesMode = 'current'
-              render({ force: true })
+              gotoTab('grades', { animate: true })
             },
           }),
         ]),
@@ -6144,6 +6142,23 @@ function switchTab(id, { animate = false, fromDrag = false } = {}) {
     const hwPane = track.querySelector(':scope > .tab-pane[data-tab="hw"]')
     if (hwPane) hwPane.scrollTop = 0
   }
+}
+
+/**
+ * Перейти на вкладку и перерисовать её содержимое.
+ * Панели pager живут постоянно, поэтому одного switchTab мало:
+ * без перерисовки покажется устаревший вариант (например, режим «препод»
+ * вместо только что выбранного режима «аудитория»).
+ */
+function gotoTab(tabId, { animate = true } = {}) {
+  if (!tabId || !TAB_ORDER.includes(tabId)) return
+  if (state.tab === tabId) {
+    if (!refreshTabPanes([tabId])) render({ force: true })
+    softUpdateNav()
+    return
+  }
+  switchTab(tabId, { animate })
+  refreshTabPanes([tabId])
 }
 
 const swipe = {
