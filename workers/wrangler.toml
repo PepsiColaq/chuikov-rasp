@@ -1,0 +1,7 @@
+name = "rasp-supabase-proxy"
+main = "supabase-proxy.js"
+compatibility_date = "2024-11-01"
+
+# Публичный URL проекта Supabase (не секрет — тот же, что в клиенте)
+[vars]
+SUPABASE_URL = "https://azuergqxvqrkvrvqelha.supabase.co"

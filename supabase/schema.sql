@@ -1,4 +1,4 @@
--- Chuikov schedule — run in Supabase SQL Editor (once).
+-- Chuikov schedule вЂ” run in Supabase SQL Editor (once).
 create extension if not exists pgcrypto;
 
 -- Stable text ids (match frontend)
@@ -50,6 +50,7 @@ create table if not exists homework (
   body text not null,
   due_date date,
   lesson_id text references lessons(id) on delete set null,
+  images text[] not null default '{}',
   created_at timestamptz not null default now()
 );
 
@@ -105,7 +106,7 @@ create or replace function public.rasp_public_meta()
 returns json
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   select json_build_object('semesterLabel', semester_label) from app_meta where id = 'main';
 $$;
@@ -116,15 +117,19 @@ create or replace function public.hash_access_code(p_code text)
 returns text
 language sql
 immutable
+set search_path = public, extensions
 as $$
-  select encode(digest('chuikov-rasp-v1:' || trim(p_code), 'sha256'), 'hex');
+  select encode(
+    digest(convert_to('chuikov-rasp-v1:' || trim(p_code), 'UTF8'), 'sha256'),
+    'hex'
+  );
 $$;
 
 create or replace function public.rasp_login(p_code text, p_group_id text default null)
 returns json
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_hash text;
@@ -136,13 +141,13 @@ declare
   v_locked timestamptz;
 begin
   if p_code is null or length(trim(p_code)) < 8 then
-    raise exception 'Код слишком короткий';
+    raise exception 'РљРѕРґ СЃР»РёС€РєРѕРј РєРѕСЂРѕС‚РєРёР№';
   end if;
 
   v_bucket := coalesce(p_group_id, 'any');
   select fails, locked_until into v_fails, v_locked from login_attempts where bucket = v_bucket;
   if v_locked is not null and v_locked > now() then
-    raise exception 'Слишком много попыток. Подождите.';
+    raise exception 'РЎР»РёС€РєРѕРј РјРЅРѕРіРѕ РїРѕРїС‹С‚РѕРє. РџРѕРґРѕР¶РґРёС‚Рµ.';
   end if;
 
   v_hash := public.hash_access_code(p_code);
@@ -178,7 +183,7 @@ begin
     set fails = case when login_attempts.fails + 1 >= 8 then 0 else login_attempts.fails + 1 end,
         locked_until = case when login_attempts.fails + 1 >= 8 then now() + interval '15 minutes' else login_attempts.locked_until end;
 
-  raise exception 'Неверный код';
+  raise exception 'РќРµРІРµСЂРЅС‹Р№ РєРѕРґ';
 end;
 $$;
 
@@ -186,7 +191,7 @@ create or replace function public.rasp_session(p_token text)
 returns json
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare s sessions%rowtype;
 begin
@@ -204,7 +209,7 @@ create or replace function public.rasp_logout(p_token text)
 returns void
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 begin
   delete from sessions where token = p_token;
@@ -215,34 +220,55 @@ create or replace function public._require_write(p_token text, p_group_id text)
 returns sessions
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare s sessions%rowtype;
 begin
   select * into s from sessions where token = p_token;
   if s.token is null or s.expires_at < now() then
-    raise exception 'Нужен вход старосты или админа';
+    raise exception 'РќСѓР¶РµРЅ РІС…РѕРґ СЃС‚Р°СЂРѕСЃС‚С‹ РёР»Рё Р°РґРјРёРЅР°';
   end if;
   if s.role = 'admin' then return s; end if;
   if s.role = 'starosta' and s.group_id = p_group_id then return s; end if;
-  raise exception 'Нет прав на эту группу';
+  raise exception 'РќРµС‚ РїСЂР°РІ РЅР° СЌС‚Сѓ РіСЂСѓРїРїСѓ';
 end;
 $$;
 
 create or replace function public.rasp_add_homework(
-  p_token text, p_group_id text, p_subject text, p_body text, p_due_date date, p_lesson_id text
+  p_token text,
+  p_group_id text,
+  p_subject text,
+  p_body text,
+  p_due_date date,
+  p_lesson_id text,
+  p_images text[] default '{}'
 ) returns json
-language plpgsql security definer set search_path = public as $$
-declare s sessions%rowtype; v_id text;
+language plpgsql security definer set search_path = public, extensions as $$
+declare s sessions%rowtype; v_id text; v_imgs text[];
 begin
   s := public._require_write(p_token, p_group_id);
-  if length(trim(p_subject)) = 0 or length(trim(p_body)) = 0 then
-    raise exception 'Укажите предмет и текст ДЗ';
+  if length(trim(coalesce(p_subject, ''))) = 0 then
+    raise exception 'Укажите предмет';
   end if;
-  if length(p_body) > 1000 then raise exception 'ДЗ слишком длинное'; end if;
+  if length(trim(coalesce(p_body, ''))) = 0 and (p_images is null or coalesce(array_length(p_images, 1), 0) = 0) then
+    raise exception 'Укажите текст ДЗ или прикрепите фото';
+  end if;
+  if length(coalesce(p_body, '')) > 1000 then raise exception 'ДЗ слишком длинное'; end if;
+  v_imgs := coalesce(p_images, '{}');
+  if coalesce(array_length(v_imgs, 1), 0) > 6 then
+    raise exception 'Максимум 6 фото';
+  end if;
   v_id := 'hw_' || encode(gen_random_bytes(8), 'hex');
-  insert into homework(id, group_id, subject, body, due_date, lesson_id)
-    values (v_id, p_group_id, left(trim(p_subject),80), left(trim(p_body),1000), p_due_date, p_lesson_id);
+  insert into homework(id, group_id, subject, body, due_date, lesson_id, images)
+    values (
+      v_id,
+      p_group_id,
+      left(trim(p_subject),80),
+      left(trim(coalesce(p_body, '')),1000),
+      p_due_date,
+      p_lesson_id,
+      v_imgs
+    );
   insert into audit_log(action, group_id, detail, by_role)
     values ('homework_add', p_group_id, left(trim(p_subject),80), s.role);
   return json_build_object('id', v_id);
@@ -251,7 +277,7 @@ $$;
 
 create or replace function public.rasp_delete_homework(p_token text, p_group_id text, p_hw_id text)
 returns void
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare s sessions%rowtype;
 begin
   s := public._require_write(p_token, p_group_id);
@@ -265,12 +291,12 @@ create or replace function public.rasp_set_override(
   p_token text, p_group_id text, p_lesson_id text, p_date date,
   p_type text, p_new_room text, p_new_subject text, p_note text
 ) returns json
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare s sessions%rowtype; v_id text;
 begin
   s := public._require_write(p_token, p_group_id);
   if p_type not in ('room_only','subject','subject_and_room','cancelled') then
-    raise exception 'Неверный тип замены';
+    raise exception 'РќРµРІРµСЂРЅС‹Р№ С‚РёРї Р·Р°РјРµРЅС‹';
   end if;
   delete from overrides where group_id = p_group_id and lesson_id = p_lesson_id and on_date = p_date;
   v_id := 'ovr_' || encode(gen_random_bytes(8), 'hex');
@@ -285,7 +311,7 @@ $$;
 
 create or replace function public.rasp_clear_override(p_token text, p_group_id text, p_override_id text)
 returns void
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare s sessions%rowtype;
 begin
   s := public._require_write(p_token, p_group_id);
@@ -298,13 +324,13 @@ $$;
 create or replace function public.rasp_create_group(
   p_token text, p_name text, p_faculty text, p_starosta_code text
 ) returns json
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare s sessions%rowtype; v_id text;
 begin
   select * into s from sessions where token = p_token and role = 'admin' and expires_at > now();
-  if s.token is null then raise exception 'Только админ'; end if;
-  if length(trim(p_starosta_code)) < 8 then raise exception 'Код слишком короткий'; end if;
-  v_id := 'g_' || lower(regexp_replace(trim(p_name), '[^a-zA-Z0-9а-яА-ЯёЁ]+', '_', 'g'));
+  if s.token is null then raise exception 'РўРѕР»СЊРєРѕ Р°РґРјРёРЅ'; end if;
+  if length(trim(p_starosta_code)) < 8 then raise exception 'РљРѕРґ СЃР»РёС€РєРѕРј РєРѕСЂРѕС‚РєРёР№'; end if;
+  v_id := 'g_' || lower(regexp_replace(trim(p_name), '[^a-zA-Z0-9Р°-СЏРђ-РЇС‘РЃ]+', '_', 'g'));
   insert into groups(id, name, faculty, starosta_code_hash)
     values (v_id, left(trim(p_name),48), left(coalesce(p_faculty,''),32), public.hash_access_code(p_starosta_code));
   insert into audit_log(action, group_id, detail, by_role)
@@ -315,12 +341,12 @@ $$;
 
 create or replace function public.rasp_reset_code(p_token text, p_group_id text, p_new_code text)
 returns void
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare s sessions%rowtype;
 begin
   select * into s from sessions where token = p_token and role = 'admin' and expires_at > now();
-  if s.token is null then raise exception 'Только админ'; end if;
-  if length(trim(p_new_code)) < 8 then raise exception 'Код слишком короткий'; end if;
+  if s.token is null then raise exception 'РўРѕР»СЊРєРѕ Р°РґРјРёРЅ'; end if;
+  if length(trim(p_new_code)) < 8 then raise exception 'РљРѕРґ СЃР»РёС€РєРѕРј РєРѕСЂРѕС‚РєРёР№'; end if;
   update groups set starosta_code_hash = public.hash_access_code(p_new_code) where id = p_group_id;
   insert into audit_log(action, group_id, by_role) values ('code_reset', p_group_id, 'admin');
 end;
@@ -328,11 +354,11 @@ $$;
 
 create or replace function public.rasp_reset_semester(p_token text, p_group_id text)
 returns void
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare s sessions%rowtype;
 begin
   select * into s from sessions where token = p_token and role = 'admin' and expires_at > now();
-  if s.token is null then raise exception 'Только админ'; end if;
+  if s.token is null then raise exception 'РўРѕР»СЊРєРѕ Р°РґРјРёРЅ'; end if;
   delete from homework where group_id = p_group_id;
   delete from overrides where group_id = p_group_id;
   delete from lessons where group_id = p_group_id;
@@ -343,10 +369,11 @@ $$;
 grant execute on function public.rasp_login(text, text) to anon, authenticated;
 grant execute on function public.rasp_session(text) to anon, authenticated;
 grant execute on function public.rasp_logout(text) to anon, authenticated;
-grant execute on function public.rasp_add_homework(text, text, text, text, date, text) to anon, authenticated;
+grant execute on function public.rasp_add_homework(text, text, text, text, date, text, text[]) to anon, authenticated;
 grant execute on function public.rasp_delete_homework(text, text, text) to anon, authenticated;
 grant execute on function public.rasp_set_override(text, text, text, date, text, text, text, text) to anon, authenticated;
 grant execute on function public.rasp_clear_override(text, text, text) to anon, authenticated;
 grant execute on function public.rasp_create_group(text, text, text, text) to anon, authenticated;
 grant execute on function public.rasp_reset_code(text, text, text) to anon, authenticated;
 grant execute on function public.rasp_reset_semester(text, text) to anon, authenticated;
+

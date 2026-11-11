@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>30 UI-вариантов · Колледж Чуйкова</title>
+  <style>
+    :root { --page:#16181c; --ink:#f2f2f0; --muted:#9aa0a8; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI",system-ui,sans-serif; background:var(--page); color:var(--ink); }
+    header { padding:14px 18px; border-bottom:1px solid #2c3038; display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; }
+    h1 { margin:0; font-size:17px; }
+    .sub { margin:4px 0 0; color:var(--muted); font-size:13px; }
+    .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .controls button, .controls select {
+      background:#2f3540; color:#fff; border:1px solid #3d4450; border-radius:8px;
+      padding:8px 12px; font:inherit; cursor:pointer;
+    }
+    .controls select { max-width:min(380px,72vw); }
+    #err {
+      display:none; margin:12px 18px; padding:12px; background:#3b1515; color:#ffb4b4;
+      border-radius:10px; font-size:13px; white-space:pre-wrap;
+    }
+    .nums { display:flex; flex-wrap:wrap; gap:6px; padding:12px 18px; border-bottom:1px solid #2c3038; }
+    .nums button {
+      width:34px; height:34px; border-radius:8px; border:1px solid #3d4450;
+      background:#232830; color:#ddd; cursor:pointer; font-size:12px;
+    }
+    .nums button.on { background:#4f86c6; border-color:#4f86c6; color:#fff; font-weight:700; }
+    .stage { display:flex; flex-wrap:wrap; gap:24px; justify-content:center; padding:24px 16px 40px; align-items:flex-start; }
+    .meta { width:min(300px,100%); }
+    .meta .tag { display:inline-block; font-size:12px; color:#9ec0ef; background:#243247; padding:3px 8px; border-radius:999px; }
+    .meta h2 { margin:8px 0; font-size:22px; }
+    .meta p { color:var(--muted); font-size:14px; line-height:1.45; }
+    .phone {
+      width:360px; height:720px; border-radius:28px; overflow:hidden;
+      border:3px solid #0a0a0a; background:#fff; color:#111;
+      box-shadow:0 18px 40px rgba(0,0,0,.4); display:flex; flex-direction:column;
+    }
+    .notch { height:26px; display:flex; align-items:center; justify-content:center; font-size:11px; opacity:.5; flex-shrink:0; }
+    .body { flex:1; overflow:auto; }
+    .tabbar {
+      display:grid; grid-template-columns:repeat(5,1fr); gap:2px; padding:8px 4px 12px;
+      border-top:1px solid rgba(0,0,0,.08); font-size:10px; text-align:center; flex-shrink:0;
+    }
+    .tabbar span { opacity:.5; padding:4px 0; }
+    .tabbar span.on { opacity:1; font-weight:700; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>30 UI-вариантов · только превью</h1>
+      <p class="sub">Стрелки / клик по номеру. В боевой сайт не внедрено.</p>
+    </div>
+    <div class="controls">
+      <button type="button" id="prev">←</button>
+      <select id="pick"></select>
+      <button type="button" id="next">→</button>
+    </div>
+  </header>
+  <div id="err"></div>
+  <div class="nums" id="nums"></div>
+  <div class="stage">
+    <div class="meta">
+      <div class="tag" id="tag">—</div>
+      <h2 id="title">Загрузка…</h2>
+      <p id="desc"></p>
+    </div>
+    <div class="phone" id="phone"></div>
+  </div>
+<script>
+(function () {
+  function showErr(e) {
+    var box = document.getElementById('err');
+    box.style.display = 'block';
+    box.textContent = String(e && e.stack ? e.stack : e);
+  }
+
+  function shell(bg, fg, topHtml, bodyHtml, tabs, tabOn) {
+    tabs = tabs || ['Пары', 'ДЗ', 'Преп.', 'Замены', 'Ещё'];
+    tabOn = tabOn || 0;
+    var tabHtml = '';
+    for (var i = 0; i < tabs.length; i++) {
+      tabHtml += '<span class="' + (i === tabOn ? 'on' : '') + '">' + tabs[i] + '</span>';
+    }
+    return (
+      '<div class="notch" style="background:' + bg + ';color:' + fg + '">9:41</div>' +
+      '<div class="body" style="background:' + bg + ';color:' + fg + '">' + (topHtml || '') + (bodyHtml || '') + '</div>' +
+      '<div class="tabbar" style="background:' + bg + ';color:' + fg + '">' + tabHtml + '</div>'
+    );
+  }
+
+  function days(active) {
+    active = active == null ? 2 : active;
+    var d = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    var html = '<div style="display:flex;gap:6px;padding:8px 12px">';
+    for (var i = 0; i < d.length; i++) {
+      html += '<div style="min-width:40px;text-align:center;padding:6px 0;border-radius:10px;' +
+        (i === active ? 'background:#1b3a5f;color:#fff;font-weight:700' : '') + '">' + d[i] + '</div>';
+    }
+    return html + '</div>';
+  }
+
+  var R = {};
+
+  R[1] = function () {
+    return shell('#f4f5f7', '#111',
+      '<div style="padding:12px 14px"><div style="font-size:12px;opacity:.6">Колледж Чуйкова</div><div style="font-size:20px;font-weight:700">0903-ПД3 · Ср</div></div>',
+      '<div style="padding:8px 14px 20px 52px;position:relative">' +
+        '<div style="position:absolute;left:28px;top:8px;bottom:8px;width:2px;background:#d0d5dd"></div>' +
+        [['08:30','Математика','214'],['10:15','История','308'],['12:10','Физкультура','Зал']].map(function (x) {
+          return '<div style="position:relative;margin-bottom:14px">' +
+            '<div style="position:absolute;left:-40px;font-size:11px;opacity:.65">' + x[0] + '</div>' +
+            '<div style="position:absolute;left:-28px;top:4px;width:10px;height:10px;border-radius:50%;background:#1b3a5f"></div>' +
+            '<div style="background:#fff;border:1px solid #e4e4e0;border-radius:12px;padding:10px"><b>' + x[1] + '</b><div style="font-size:12px;opacity:.65">ауд. ' + x[2] + '</div></div></div>';
+        }).join('') + '</div>', null, 0);
+  };
+
+  R[2] = function () {
+    var names = ['Математика', 'История', 'Ин.язык'];
+    var times = ['08:30–10:00', '10:15–11:45', '12:10–13:40'];
+    var rooms = [214, 308, 112];
+    var html = '';
+    for (var i = 0; i < 3; i++) {
+      html += '<div style="margin:10px 14px;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #dde1e8">' +
+        '<div style="display:flex"><div style="width:64px;background:#1b3a5f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800">' + (i + 1) + '</div>' +
+        '<div style="padding:12px;flex:1"><div style="font-weight:700">' + names[i] + '</div><div style="font-size:12px;opacity:.6">' + times[i] + '</div></div></div>' +
+        '<div style="background:#f3f5f9;padding:8px 12px;font-size:12px">ауд. ' + rooms[i] + ' · Иванов А.А.</div></div>';
+    }
+    return shell('#eef1f6', '#111', '<div style="padding:14px"><b>Пары · Ср</b></div>', html, null, 0);
+  };
+
+  R[3] = function () {
+    return shell('#fafafa', '#111', '<div style="padding:12px 14px;font-weight:700">Ср · компактно</div>',
+      '<details open style="border-bottom:1px solid #eee;padding:10px 14px"><summary style="list-style:none;display:flex;justify-content:space-between"><span><b>08:30</b> · Математика</span><span style="opacity:.5">214</span></summary><div style="margin-top:8px;font-size:13px;opacity:.75">Преподаватель, заметки…</div></details>' +
+      '<details style="border-bottom:1px solid #eee;padding:10px 14px"><summary style="list-style:none;display:flex;justify-content:space-between"><span><b>10:15</b> · История ★</span><span style="opacity:.5">101</span></summary></details>' +
+      '<details style="border-bottom:1px solid #eee;padding:10px 14px"><summary style="list-style:none;display:flex;justify-content:space-between"><span><b>12:10</b> · Физ-ра</span><span style="opacity:.5">Зал</span></summary></details>',
+      null, 0);
+  };
+
+  R[4] = function () {
+    return shell('#fff', '#111', '<div style="padding:12px 14px;border-bottom:1px solid #eee"><b>Среда</b></div>',
+      '<div style="display:grid;grid-template-columns:72px 1fr;font-size:14px">' +
+      '<div style="padding:12px;border-bottom:1px solid #f0f0f0;opacity:.65">08:30</div><div style="padding:12px;border-bottom:1px solid #f0f0f0;border-left:1px solid #f0f0f0">Математика<br><span style="opacity:.55">214</span></div>' +
+      '<div style="padding:12px;border-bottom:1px solid #f0f0f0;opacity:.65">10:15</div><div style="padding:12px;border-bottom:1px solid #f0f0f0;border-left:1px solid #f0f0f0">История<br><span style="opacity:.55">308</span></div>' +
+      '<div style="padding:12px;opacity:.65">12:10</div><div style="padding:12px;border-left:1px solid #f0f0f0">Ин. язык<br><span style="opacity:.55">112</span></div></div>', null, 0);
+  };
+
+  R[5] = function () {
+    return shell('#f7f7f5', '#111',
+      '<div style="padding:12px 14px"><div style="opacity:.55;font-size:12px">Следующая пара через 12 мин</div></div>',
+      '<div style="margin:0 14px 16px;padding:18px;border-radius:18px;background:#1b3a5f;color:#fff"><div style="font-size:12px;opacity:.75">08:30 · ауд. 214</div><div style="font-size:26px;font-weight:800;margin-top:6px">Математика</div><div style="margin-top:8px;opacity:.8">Иванов А.А.</div></div>' +
+      '<div style="padding:0 14px;opacity:.7;font-size:13px;margin-bottom:6px">Позже сегодня</div>' +
+      '<div style="margin:0 14px 8px;padding:10px 12px;background:#fff;border:1px solid #e8e8e4;border-radius:12px;display:flex;justify-content:space-between"><span><b>10:15</b> История</span><span style="opacity:.55">308</span></div>' +
+      '<div style="margin:0 14px 8px;padding:10px 12px;background:#fff;border:1px solid #e8e8e4;border-radius:12px;display:flex;justify-content:space-between"><span><b>12:10</b> Ин.язык</span><span style="opacity:.55">112</span></div>',
+      null, 0);
+  };
+
+  R[6] = function () {
+    var items = [['#e8f0fe','Лекция','Математика'],['#e7f6ed','Практика','История'],['#fff3e0','Лаба','Программирование']];
+    return shell('#f6f6f4', '#111', '<div style="padding:12px 14px;font-weight:700">По типу занятия</div>',
+      items.map(function (x) {
+        return '<div style="margin:8px 14px;padding:12px;border-radius:12px;background:' + x[0] + '"><span class="pill" style="background:#00000014">' + x[1] + '</span><div style="font-weight:700;margin-top:6px">' + x[2] + '</div><div style="font-size:12px;opacity:.65">08:30 · ауд. 214</div></div>';
+      }).join(''), null, 0);
+  };
+
+  R[7] = function () {
+    return shell('#fff', '#111', '<div style="padding:14px;font-family:Georgia,serif;font-size:22px">Расписание</div>',
+      '<div style="padding:0 14px">' +
+      '<div style="padding:12px 0;border-bottom:1px solid #ddd"><div style="font-size:12px">08:30</div><div>Математика · 214</div></div>' +
+      '<div style="padding:12px 0;border-bottom:2px solid #111"><div style="font-size:12px">10:15 · ЗАМЕНА</div><div style="font-weight:700">История → ауд. 101</div></div>' +
+      '<div style="padding:12px 0;border-bottom:1px solid #ddd"><div style="font-size:12px">12:10</div><div>Ин. язык · 112</div></div></div>', null, 0);
+  };
+
+  R[8] = function () {
+    return shell('#f7f7f5', '#111', '<div style="padding:14px;font-weight:700">ДЗ · чеклист</div>',
+      '<label style="display:flex;gap:10px;margin:0 14px 10px;padding:12px;background:#fff;border:1px solid #e6e6e2;border-radius:12px"><input type="checkbox" checked /><span><b>Математика</b><div style="font-size:13px;opacity:.7">№12–15</div></span></label>' +
+      '<label style="display:flex;gap:10px;margin:0 14px 10px;padding:12px;background:#fff;border:1px solid #e6e6e2;border-radius:12px"><input type="checkbox" /><span><b>История</b><div style="font-size:13px;opacity:.7">Конспект §4</div></span></label>',
+      null, 1);
+  };
+
+  R[9] = function () {
+    return shell('#f0f2f5', '#111', '<div style="padding:14px;font-weight:700">Объявления ДЗ</div>',
+      '<div style="margin:0 14px 12px;background:#fff;border-radius:16px;padding:14px"><div style="display:flex;justify-content:space-between"><b>Математика</b><span class="pill" style="background:#fff7ed;color:#b45309">до 02.10</span></div><div style="margin-top:8px">Сделать №12–15</div></div>' +
+      '<div style="margin:0 14px 12px;background:#fff;border-radius:16px;padding:14px"><div style="display:flex;justify-content:space-between"><b>История</b><span class="pill" style="background:#fff7ed;color:#b45309">до 04.10</span></div><div style="margin-top:8px">Конспект §4</div></div>',
+      null, 1);
+  };
+
+  R[10] = function () {
+    var cells = '';
+    for (var n = 1; n <= 30; n++) {
+      var on = (n === 2 || n === 4 || n === 11);
+      cells += '<div style="padding:8px 0;border-radius:8px;text-align:center;' + (on ? 'background:#1b3a5f;color:#fff' : '') + '">' + n +
+        (on ? '<div style="width:4px;height:4px;border-radius:50%;background:#fbbf24;margin:3px auto 0"></div>' : '') + '</div>';
+    }
+    return shell('#fff', '#111', '<div style="padding:14px;font-weight:700">Октябрь · дедлайны</div>',
+      '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:0 12px 12px;font-size:12px">' + cells + '</div>' +
+      '<div style="padding:8px 14px;border-top:1px solid #eee"><b>2 окт</b><div style="opacity:.7;font-size:13px">Математика · №12–15</div></div>',
+      null, 1);
+  };
+
+  R[11] = function () {
+    return shell('#111', '#fff', '<div style="padding:14px;opacity:.7">ДЗ 1 / 3</div>',
+      '<div style="margin:20px 18px;height:420px;border-radius:22px;background:linear-gradient(160deg,#1b3a5f,#3d6b4f);padding:22px;display:flex;flex-direction:column;justify-content:flex-end">' +
+      '<div style="font-size:13px;opacity:.8">до 02.10</div><div style="font-size:28px;font-weight:800;margin:6px 0">Математика</div>' +
+      '<div style="opacity:.9">Сделать №12–15, фото ответа прикрепить</div></div>' +
+      '<div style="text-align:center;opacity:.5;font-size:12px">листай →</div>', null, 1);
+  };
+
+  R[12] = function () {
+    return shell('#f7f7f5', '#111', '<div style="padding:14px;font-weight:700">ДЗ по предметам</div>',
+      '<div style="margin:0 14px 10px;border:1px solid #e4e4e0;border-radius:12px;overflow:hidden;background:#fff"><div style="padding:10px 12px;background:#e8eef5;display:flex;justify-content:space-between"><b>Математика</b><span>2</span></div><div style="padding:10px 12px;font-size:13px;opacity:.75">Есть активные задания</div></div>' +
+      '<div style="margin:0 14px 10px;border:1px solid #e4e4e0;border-radius:12px;overflow:hidden;background:#fff"><div style="padding:10px 12px;background:#e8eef5;display:flex;justify-content:space-between"><b>История</b><span>1</span></div><div style="padding:10px 12px;font-size:13px;opacity:.75">Есть активные задания</div></div>',
+      null, 1);
+  };
+
+  R[13] = function () {
+    return shell('#111', '#fff', '<div style="padding:14px;font-weight:700">ДЗ · вложения</div>',
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 14px">' +
+      ['#334','#453','#235','#532'].map(function (c, i) {
+        return '<div style="aspect-ratio:1;border-radius:12px;background:' + c + ';display:flex;align-items:end;padding:8px;font-size:11px">фото ' + (i + 1) + '</div>';
+      }).join('') + '</div><div style="padding:14px;opacity:.75;font-size:13px">Математика · №12–15</div>', null, 1);
+  };
+
+  R[14] = function () {
+    return shell('#f7f7f5', '#111',
+      '<div style="background:#9e2b2b;color:#fff;padding:10px 14px;font-weight:700">Сегодня 2 замены ▾</div>' +
+      '<div style="background:#fff5f5;padding:10px 14px;font-size:13px;border-bottom:1px solid #f0d0d0">10:15 История → ауд. 101<br>12:10 Ин.язык отменена</div>' +
+      '<div style="padding:12px 14px;font-weight:700">Пары</div>',
+      '<div style="padding:10px 12px;border-bottom:1px solid #eee"><div style="font-size:12px;opacity:.6">08:30</div><div style="font-weight:650">Математика</div></div>' +
+      '<div style="padding:10px 12px;background:#fff7ed"><div style="font-size:12px;opacity:.6">10:15 · замена</div><div style="font-weight:650">История · 101</div></div>',
+      null, 3);
+  };
+
+  R[15] = function () {
+    return shell('#fff', '#111', '<div style="padding:14px;font-weight:700">Замены · diff</div>',
+      '<div style="margin:0 14px;display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+      '<div style="padding:12px;background:#f5f5f5;border-radius:12px;opacity:.7"><div style="font-size:11px">БЫЛО</div><b>ауд. 308</b></div>' +
+      '<div style="padding:12px;background:#e8f5e9;border-radius:12px"><div style="font-size:11px">СТАЛО</div><b>ауд. 101</b></div></div>' +
+      '<div style="padding:14px;font-size:13px;opacity:.75">История · Ср · 10:15</div>', null, 3);
+  };
+
+  R[16] = function () {
+    return shell('#f4f4f2', '#111', '<div style="padding:14px;font-weight:700">Ср</div>',
+      '<div style="margin:0 14px 8px;padding:10px;border-radius:10px;background:#e8e8e8;opacity:.55">08:30 Математика · 214</div>' +
+      '<div style="margin:0 14px 8px;padding:12px;border-radius:10px;background:#fff;border:2px solid #b45309;font-weight:700">10:15 История · ЗАМЕНА → 101</div>' +
+      '<div style="margin:0 14px 8px;padding:10px;border-radius:10px;background:#e8e8e8;opacity:.55">12:10 Ин.язык · 112</div>', null, 3);
+  };
+
+  R[17] = function () {
+    return shell('#fff', '#111',
+      '<div style="padding:12px 14px"><div style="padding:12px 14px;border-radius:999px;border:1px solid #ddd;background:#f5f5f5">Ива</div></div>',
+      ['Иванов А.А.', 'Иванова М.С.', 'Иваницкий П.В.'].map(function (n) {
+        return '<div style="padding:14px;border-bottom:1px solid #f0f0f0;display:flex;gap:10px;align-items:center"><div style="width:36px;height:36px;border-radius:50%;background:#e8eef5"></div><div><b>' + n + '</b><div style="font-size:12px;opacity:.55">сегодня 2 пары</div></div></div>';
+      }).join(''), null, 2);
+  };
+
+  R[18] = function () {
+    return shell('#f7f7f5', '#111',
+      '<div style="padding:18px 14px;background:#1b3a5f;color:#fff"><div style="font-size:12px;opacity:.7">Преподаватель</div><div style="font-size:24px;font-weight:800;margin-top:4px">Иванов А.А.</div></div>',
+      '<div style="padding:14px;font-size:13px;opacity:.6">Ближайшие</div>' +
+      '<div style="margin:0 14px 8px;padding:12px;background:#fff;border-radius:12px;border:1px solid #e8e8e4"><div style="font-size:12px;opacity:.55">Сегодня 08:30</div><b>Математика · 214</b></div>' +
+      '<div style="margin:0 14px 8px;padding:12px;background:#fff;border-radius:12px;border:1px solid #e8e8e4"><div style="font-size:12px;opacity:.55">Чт 10:15</div><b>Алгебра · 220</b></div>',
+      null, 2);
+  };
+
+  R[19] = function () {
+    return shell('#fff', '#111', '<div style="padding:14px;font-weight:700">Преподаватели</div>',
+      '<div style="display:flex"><div style="flex:1"><div style="padding:8px 14px;background:#f5f5f5;font-size:12px;font-weight:700">И</div>' +
+      '<div style="padding:12px 14px;border-bottom:1px solid #f0f0f0">Иванов А.А.</div><div style="padding:12px 14px;border-bottom:1px solid #f0f0f0">Ильина Н.В.</div></div>' +
+      '<div style="width:22px;font-size:10px;text-align:center;opacity:.45;padding-top:8px;line-height:1.6">А<br>Б<br>В<br>И<br>К</div></div>', null, 2);
+  };
+
+  R[20] = function () {
+    return shell('#f7f7f5', '#111',
+      '<div style="padding:14px;font-weight:700">Выбор группы</div><div style="display:flex;gap:8px;padding:0 14px 12px;flex-wrap:wrap">' +
+      '<span class="pill" style="padding:8px 12px;background:#1b3a5f;color:#fff">ПД</span>' +
+      '<span class="pill" style="padding:8px 12px;background:#e8e8e4">Ю</span>' +
+      '<span class="pill" style="padding:8px 12px;background:#e8e8e4">ИБАС</span></div>',
+      ['0903-ПД1','0903-ПД2','0903-ПД3','0903-ПД4'].map(function (g) {
+        return '<div style="margin:0 14px 8px;padding:14px;background:#fff;border-radius:12px;border:1px solid #e4e4e0;font-weight:650">' + g + '</div>';
+      }).join(''), null, 0);
+  };
+
+  R[21] = function () {
+    return shell('#fff', '#111', '<div style="padding:14px;font-weight:700">Группы</div>',
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 14px">' +
+      ['0903-ПД1','0903-ПД2','0903-ПД3','0903-ПД4','0902-Ю1','0902-Ю2'].map(function (g) {
+        return '<div style="aspect-ratio:1.2;border-radius:16px;background:#e8eef5;display:flex;align-items:center;justify-content:center;font-weight:750;text-align:center;padding:8px">' + g + '</div>';
+      }).join('') + '</div>', null, 0);
+  };
+
+  R[22] = function () {
+    return shell('#f7f7f5', '#111',
+      '<div style="padding:14px"><b>0903-ПД3</b></div>' + days(2) +
+      '<div style="padding:10px 12px"><div style="font-size:12px;opacity:.6">08:30</div><div style="font-weight:650">Математика</div></div>',
+      '',
+      ['▦', '✎', '👤', '⇄', '···'], 0);
+  };
+
+  R[23] = function () {
+    return '<div style="display:flex;height:100%;background:#f5f6f8;color:#111">' +
+      '<div style="width:88px;background:#1b3a5f;color:#fff;padding:16px 8px;font-size:11px"><div style="font-weight:700;margin-bottom:16px">Чуйкова</div>' +
+      ['Пары','ДЗ','Преп.','Замены','Ещё'].map(function (t, i) {
+        return '<div style="padding:10px 6px;border-radius:8px;margin-bottom:4px;' + (i === 0 ? 'background:#ffffff22' : '') + '">' + t + '</div>';
+      }).join('') + '</div>' +
+      '<div style="flex:1;padding:14px"><b>Среда</b><div style="margin-top:12px;padding:12px;background:#fff;border-radius:12px">08:30 Математика</div>' +
+      '<div style="margin-top:8px;padding:12px;background:#fff;border-radius:12px">10:15 История</div></div></div>';
+  };
+
+  R[24] = function () {
+    return shell('#f3efe6', '#2a2418', '<div style="padding:14px;font-family:Georgia,serif;font-size:22px">Тетрадь · Ср</div>',
+      '<div style="margin:0 14px 10px;padding:12px;background:#fffaf0;border:1px solid #e5dcc8;border-radius:8px"><div style="font-size:12px;opacity:.6">08:30</div><div style="font-family:Georgia,serif;font-size:18px">Математика</div><div style="font-size:12px;opacity:.65">214</div></div>' +
+      '<div style="margin:0 14px 10px;padding:12px;background:#fffaf0;border:1px solid #e5dcc8;border-radius:8px"><div style="font-size:12px;opacity:.6">10:15</div><div style="font-family:Georgia,serif;font-size:18px">История</div><div style="font-size:12px;opacity:.65">308</div></div>',
+      null, 0);
+  };
+
+  R[25] = function () {
+    return shell('#0f1c2e', '#e8eef5',
+      '<div style="padding:18px 14px;border-bottom:1px solid #24344a"><div style="font-family:Georgia,serif;font-size:13px;letter-spacing:.08em;opacity:.7">КОЛЛЕДЖ ЧУЙКОВА</div><div style="font-family:Georgia,serif;font-size:26px;margin-top:6px">0903-ПД3</div></div>' + days(2),
+      '<div style="padding:12px 14px;border-bottom:1px solid #24344a"><div style="opacity:.55;font-size:12px">08:30</div><div style="font-size:18px">Математика</div><div style="opacity:.55;font-size:12px">ауд. 214</div></div>' +
+      '<div style="padding:12px 14px"><div style="opacity:.55;font-size:12px">10:15</div><div style="font-size:18px">История</div><div style="opacity:.55;font-size:12px">ауд. 308</div></div>',
+      null, 0);
+  };
+
+  R[26] = function () {
+    return shell('#0b1220', '#d7f7ef', '<div style="padding:14px"><b style="color:#2dd4bf">Пары</b> <span style="opacity:.5">· Ср</span></div>',
+      '<div style="margin:0 14px 10px;padding:12px;border-radius:12px;border:1px solid #2dd4bf44;background:#102033"><div style="color:#2dd4bf;font-size:12px">08:30</div><div style="font-weight:700">Математика</div></div>' +
+      '<div style="margin:0 14px 10px;padding:12px;border-radius:12px;border:1px solid #2dd4bf44;background:#102033"><div style="color:#2dd4bf;font-size:12px">10:15</div><div style="font-weight:700">История</div></div>',
+      null, 0);
+  };
+
+  R[27] = function () {
+    return shell('#fbfbfa', '#111',
+      '<div style="padding:28px 20px 8px"><div style="font-size:13px;opacity:.45">Среда</div><div style="font-size:32px;font-weight:300">Расписание</div></div>',
+      '<div style="padding:18px 20px"><div style="font-size:13px;opacity:.4">08:30</div><div style="font-size:20px">Математика</div></div>' +
+      '<div style="padding:18px 20px"><div style="font-size:13px;opacity:.4">10:15</div><div style="font-size:20px">История</div></div>' +
+      '<div style="padding:18px 20px"><div style="font-size:13px;opacity:.4">12:10</div><div style="font-size:20px">Ин.язык</div></div>',
+      null, 0);
+  };
+
+  R[28] = function () {
+    return '<div style="height:100%;background:linear-gradient(145deg,#c7d8f0,#e8d5f0 50%,#d5ebe3);color:#122;display:flex;flex-direction:column">' +
+      '<div class="notch">9:41</div><div class="body" style="padding:12px">' +
+      '<div style="padding:14px;border-radius:18px;background:rgba(255,255,255,.45);border:1px solid rgba(255,255,255,.6);margin-bottom:10px"><b>0903-ПД3</b><div style="font-size:13px;opacity:.7">Среда</div></div>' +
+      '<div style="padding:12px;border-radius:16px;background:rgba(255,255,255,.4);border:1px solid rgba(255,255,255,.55);margin-bottom:8px">Математика 08:30</div>' +
+      '<div style="padding:12px;border-radius:16px;background:rgba(255,255,255,.4);border:1px solid rgba(255,255,255,.55)">История 10:15</div></div>' +
+      '<div class="tabbar"><span class="on">Пары</span><span>ДЗ</span><span>Преп.</span><span>Замены</span><span>Ещё</span></div></div>';
+  };
+
+  R[29] = function () {
+    return shell('#f7f7f5', '#111', '<div style="padding:14px;font-weight:700">Ещё</div>',
+      '<div style="margin:0 14px;padding:16px;border-radius:16px;background:#fff;border:1px solid #e4e4e0">' +
+      '<div style="font-size:12px;opacity:.55">Группа</div><div style="font-size:22px;font-weight:800">0903-ПД3</div>' +
+      '<div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+      '<div style="padding:10px;background:#e8eef5;border-radius:10px;font-size:13px">Тема</div>' +
+      '<div style="padding:10px;background:#e8eef5;border-radius:10px;font-size:13px">Поддержка</div>' +
+      '<div style="padding:10px;background:#e8eef5;border-radius:10px;font-size:13px">Вход</div>' +
+      '<div style="padding:10px;background:#e8eef5;border-radius:10px;font-size:13px">Сменить</div></div></div>', null, 4);
+  };
+
+  R[30] = function () {
+    return shell('#f7f7f5', '#111',
+      '<div style="padding:10px 14px;background:#3d6b4f;color:#fff;font-weight:700">Режим старосты · 0903-ПД3</div>',
+      '<div style="padding:14px"><div style="font-size:13px;opacity:.6;margin-bottom:8px">Новое ДЗ</div>' +
+      '<div style="padding:14px;border:2px dashed #3d6b4f55;border-radius:14px;background:#fff;min-height:80px;color:#999">Текст задания…</div>' +
+      '<div style="margin-top:12px;width:100%;padding:14px;border-radius:12px;background:#3d6b4f;color:#fff;font-weight:700;text-align:center">Опубликовать</div></div>',
+      null, 1);
+  };
+
+  var META = [
+    [1, 'Пары', 'Лента времени', 'Вертикальная ось часов, пары как блоки по длительности.'],
+    [2, 'Пары', 'Карточки «билет»', 'Номер пары крупно, предмет и кабинет полоской снизу.'],
+    [3, 'Пары', 'Компактный список', 'Одна строка на пару, детали по тапу.'],
+    [4, 'Пары', 'Сетка 2 колонки', 'Время слева, предмет/ауд. справа — как дневник.'],
+    [5, 'Пары', '«Сегодня» hero', 'Следующая пара огромным блоком, ниже остальные.'],
+    [6, 'Пары', 'Цвет по типу', 'Лекция / практика / лаба — мягкие тона.'],
+    [7, 'Пары', 'Минимализм mono', 'Почти без цвета, тонкие линии, акцент на замене.'],
+    [8, 'ДЗ', 'Чеклист', 'ДЗ как задачи с локальной галочкой «сделал».'],
+    [9, 'ДЗ', 'Доска объявлений', 'Крупные посты с бейджем дедлайна.'],
+    [10, 'ДЗ', 'Календарь дедлайнов', 'Точки на датах, тап → список ДЗ дня.'],
+    [11, 'ДЗ', 'Свайп-карточки', 'Листаешь ДЗ как сторис.'],
+    [12, 'ДЗ', 'По предмету', 'Секции «Матан», «История»…'],
+    [13, 'ДЗ', 'Фото-first', 'Превью вложений сеткой, текст вторичен.'],
+    [14, 'Замены', 'Красная лента', 'Сверху «сегодня N замен», раскрывается.'],
+    [15, 'Замены', 'Diff-вид', 'Было → стало в две колонки.'],
+    [16, 'Замены', 'Только отличия', 'Обычные пары серые, замены яркие.'],
+    [17, 'Преп.', 'Поиск-мессенджер', 'Строка сверху, результаты мгновенно.'],
+    [18, 'Преп.', 'Карточка препода', 'ФИО + ближайшие пары timeline.'],
+    [19, 'Преп.', 'Алфавитный index', 'Буквы сбоку как в контактах.'],
+    [20, 'Группы', 'Факультеты пилюлями', 'Сначала факультет, потом группы.'],
+    [21, 'Группы', 'Большие плитки', 'Группы крупной сеткой 2×N.'],
+    [22, 'Навигация', 'Иконки без подписей', 'Нижний bar только иконками.'],
+    [23, 'Навигация', 'Боковое меню', 'Для широких экранов + phone preview.'],
+    [24, 'Вайб', 'Тёплый бумажный', 'Кремовый фон, мягкая «тетрадь».'],
+    [25, 'Вайб', 'Строгий вуз', 'Тёмно-синий, serif, бренд крупнее.'],
+    [26, 'Вайб', 'Неон-тёмный', 'Dark + один яркий акцент (teal).'],
+    [27, 'Вайб', 'Светлый airy', 'Много воздуха, крупные поля, мало рамок.'],
+    [28, 'Вайб', 'Glass', 'Полупрозрачные панели на мягком фоне.'],
+    [29, 'Ещё', 'Профиль-хаб', 'Группа, тема, поддержка, вход — одной картой.'],
+    [30, 'Ещё', 'Режим старосты', 'Отдельный бейдж и крупные формы редактирования.']
+  ];
+
+  var idx = 0;
+  var phone = document.getElementById('phone');
+  var pick = document.getElementById('pick');
+  var nums = document.getElementById('nums');
+
+  META.forEach(function (m, i) {
+    var o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = m[0] + '. ' + m[2] + ' · ' + m[1];
+    pick.appendChild(o);
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = String(m[0]);
+    b.addEventListener('click', function () { show(i); });
+    nums.appendChild(b);
+  });
+
+  function show(i) {
+    idx = (i + META.length) % META.length;
+    var m = META[idx];
+    document.getElementById('tag').textContent = m[1];
+    document.getElementById('title').textContent = m[0] + '. ' + m[2];
+    document.getElementById('desc').textContent = m[3];
+    pick.value = String(idx);
+    for (var j = 0; j < nums.children.length; j++) {
+      nums.children[j].classList.toggle('on', j === idx);
+    }
+    try {
+      phone.innerHTML = R[m[0]]();
+    } catch (e) {
+      showErr(e);
+      phone.innerHTML = '<div style="padding:20px;color:#900">Ошибка макета #' + m[0] + '</div>';
+    }
+  }
+
+  document.getElementById('prev').onclick = function () { show(idx - 1); };
+  document.getElementById('next').onclick = function () { show(idx + 1); };
+  pick.onchange = function () { show(Number(pick.value)); };
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') show(idx - 1);
+    if (e.key === 'ArrowRight') show(idx + 1);
+  });
+
+  try {
+    show(0);
+  } catch (e) {
+    showErr(e);
+  }
+})();
+</script>
+</body>
+</html>

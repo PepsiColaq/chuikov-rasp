@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Имитация нагрузки — chuikov-rasp</title>
+    <style>
+      :root {
+        font-family: system-ui, sans-serif;
+        color: #e8eef7;
+        background: #0f141c;
+      }
+      body {
+        max-width: 720px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+      label {
+        display: block;
+        margin: 10px 0 4px;
+        color: #9aadc4;
+        font-size: 13px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid #2a3a50;
+        background: #172233;
+        color: #e8eef7;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 10px;
+      }
+      button {
+        margin-top: 14px;
+        padding: 12px 16px;
+        border: 0;
+        border-radius: 10px;
+        background: #2f6fed;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.stop {
+        background: #b42318;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      pre {
+        margin-top: 16px;
+        padding: 12px;
+        border-radius: 10px;
+        background: #121a26;
+        border: 1px solid #243247;
+        white-space: pre-wrap;
+        font-size: 12px;
+        line-height: 1.45;
+        min-height: 140px;
+      }
+      .hint {
+        color: #9aadc4;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Имитация гостей</h1>
+    <p class="hint">
+      Открой эту страницу в Chrome <b>с Nimbus</b>. Параллельно смотри
+      <a href="https://pepsicolaq.github.io/chuikov-rasp/" target="_blank" rel="noreferrer"
+        >сайт</a
+      >
+      — будут видны тормоза. Только чтение, без записи ДЗ.
+    </p>
+
+    <label>Supabase URL (или proxy worker)</label>
+    <input id="base" placeholder="https://xxxx.supabase.co" />
+
+    <label>Anon key</label>
+    <input id="anon" placeholder="eyJhbGciOi..." />
+
+    <div class="row">
+      <div>
+        <label>Пользователей</label>
+        <input id="users" type="number" value="500" min="1" max="2000" />
+      </div>
+      <div>
+        <label>Минут</label>
+        <input id="minutes" type="number" value="3" min="1" max="30" />
+      </div>
+      <div>
+        <label>Poll, мс</label>
+        <input id="poll" type="number" value="8000" min="3000" step="1000" />
+      </div>
+    </div>
+
+    <button id="start">Старт</button>
+    <button id="stop" class="stop" disabled>Стоп</button>
+    <pre id="log">Готово к запуску.</pre>
+
+    <script>
+      const $ = (id) => document.getElementById(id)
+      const logEl = $('log')
+      let stop = false
+      let timer = null
+
+      // автозаполнение из localStorage
+      try {
+        const saved = JSON.parse(localStorage.getItem('rasp_load_sim_v1') || '{}')
+        if (saved.base) $('base').value = saved.base
+        if (saved.anon) $('anon').value = saved.anon
+      } catch {}
+
+      function log(msg) {
+        logEl.textContent = msg
+      }
+
+      function sleep(ms) {
+        return new Promise((r) => setTimeout(r, ms))
+      }
+
+      function rand(arr) {
+        return arr[(Math.random() * arr.length) | 0]
+      }
+
+      function headers(anon) {
+        return {
+          apikey: anon,
+          Authorization: 'Bearer ' + anon,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        }
+      }
+
+      async function hit(stats, label, url, init) {
+        const t0 = performance.now()
+        try {
+          const r = await fetch(url, init)
+          const ms = performance.now() - t0
+          stats.latSum += ms
+          stats.latN++
+          stats.by[label] ||= { ok: 0, fail: 0 }
+          if (r.ok) {
+            stats.ok++
+            stats.by[label].ok++
+          } else {
+            stats.fail++
+            stats.by[label].fail++
+          }
+          return r
+        } catch {
+          stats.fail++
+          stats.by[label] ||= { ok: 0, fail: 0 }
+          stats.by[label].fail++
+          return null
+        }
+      }
+
+      function print(stats, prefix) {
+        const avg = stats.latN ? Math.round(stats.latSum / stats.latN) : 0
+        const parts = Object.entries(stats.by)
+          .map(([k, v]) => k + ':' + v.ok + '/' + v.fail)
+          .join(' ')
+        log(
+          prefix +
+            ' ok=' +
+            stats.ok +
+            ' fail=' +
+            stats.fail +
+            ' avg=' +
+            avg +
+            'ms\n' +
+            parts +
+            '\n\nСмотри сайт в другой вкладке. Если avg растёт и fail много — база уже задыхается.',
+        )
+      }
+
+      async function userLoop(id, base, anon, groups, until, poll, stats) {
+        const h = headers(anon)
+        await hit(stats, 'shell', 'https://pepsicolaq.github.io/chuikov-rasp/', { method: 'GET' })
+        await sleep(200 + Math.random() * 800)
+        const group = rand(groups)
+        if (!group?.id) return
+
+        await Promise.all([
+          hit(stats, 'meta', base + '/rest/v1/rpc/rasp_public_meta', {
+            method: 'POST',
+            headers: h,
+            body: '{}',
+          }),
+          hit(
+            stats,
+            'hw',
+            base +
+              '/rest/v1/homework?select=id,group_id,subject,due_date,created_at&group_id=eq.' +
+              encodeURIComponent(group.id) +
+              '&order=created_at.desc&limit=80',
+            { headers: h },
+          ),
+          hit(
+            stats,
+            'ovr',
+            base +
+              '/rest/v1/overrides?select=id,group_id,on_date,type&group_id=eq.' +
+              encodeURIComponent(group.id) +
+              '&limit=80',
+            { headers: h },
+          ),
+        ])
+
+        const tabs = ['schedule', 'hw', 'teacher', 'overrides', 'more']
+        while (!stop && Date.now() < until) {
+          void rand(tabs)
+          await sleep(400 + Math.random() * 1600)
+          await Promise.all([
+            hit(
+              stats,
+              'hw_poll',
+              base +
+                '/rest/v1/homework?select=id,group_id,subject,due_date&group_id=eq.' +
+                encodeURIComponent(group.id) +
+                '&order=created_at.desc&limit=40',
+              { headers: h },
+            ),
+            hit(
+              stats,
+              'ovr_poll',
+              base +
+                '/rest/v1/overrides?select=id,group_id,on_date,type&group_id=eq.' +
+                encodeURIComponent(group.id) +
+                '&limit=40',
+              { headers: h },
+            ),
+          ])
+          await sleep(poll * (0.7 + Math.random() * 0.6))
+        }
+      }
+
+      $('start').onclick = async () => {
+        const base = $('base').value.trim().replace(/\/$/, '')
+        const anon = $('anon').value.trim()
+        const users = Math.max(1, Math.min(2000, Number($('users').value) || 500))
+        const minutes = Math.max(1, Math.min(30, Number($('minutes').value) || 3))
+        const poll = Math.max(3000, Number($('poll').value) || 8000)
+        if (!base || !anon) {
+          log('Укажи Supabase URL и anon key из .env.local')
+          return
+        }
+        localStorage.setItem('rasp_load_sim_v1', JSON.stringify({ base, anon }))
+        stop = false
+        $('start').disabled = true
+        $('stop').disabled = false
+        const stats = { ok: 0, fail: 0, latSum: 0, latN: 0, by: {} }
+        log('Грузим группы…')
+        let gr
+        try {
+          gr = await fetch(base + '/rest/v1/groups?select=id,name,faculty,active&active=eq.true', {
+            headers: headers(anon),
+          })
+        } catch (e) {
+          log(
+            'Сеть/CORS: браузер заблокировал запрос.\n' +
+              'Не открывай файл как file:// — нужен localhost.\n' +
+              'В папке rasp выполни: npx --yes serve scripts -p 5179\n' +
+              'И открой http://127.0.0.1:5179/load-sim-browser.html\n\n' +
+              String(e && e.message ? e.message : e),
+          )
+          $('start').disabled = false
+          $('stop').disabled = true
+          return
+        }
+        if (!gr.ok) {
+          const body = await gr.text()
+          log('Не удалось загрузить группы: HTTP ' + gr.status + '\n' + body.slice(0, 300))
+          $('start').disabled = false
+          $('stop').disabled = true
+          return
+        }
+        stats.ok++
+        stats.by.groups ||= { ok: 0, fail: 0 }
+        stats.by.groups.ok++
+        const groups = await gr.json()
+        if (!groups.length) {
+          log('Список групп пуст.')
+          $('start').disabled = false
+          $('stop').disabled = true
+          return
+        }
+        const until = Date.now() + minutes * 60 * 1000
+        log('Старт: ' + users + ' пользователей на ' + minutes + ' мин. Групп: ' + groups.length)
+        timer = setInterval(() => print(stats, 'live'), 2000)
+        const jobs = []
+        for (let i = 0; i < users; i++) {
+          jobs.push(
+            (async () => {
+              await sleep(Math.floor((i / users) * 25000))
+              if (stop || Date.now() >= until) return
+              await userLoop(i, base, anon, groups, until, poll, stats)
+            })(),
+          )
+        }
+        await Promise.all(jobs)
+        clearInterval(timer)
+        print(stats, 'DONE')
+        $('start').disabled = false
+        $('stop').disabled = true
+      }
+
+      $('stop').onclick = () => {
+        stop = true
+        $('stop').disabled = true
+      }
+    </script>
+  </body>
+</html>
