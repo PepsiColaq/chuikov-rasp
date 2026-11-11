@@ -55,6 +55,7 @@ function saveOfflineSnap(data) {
         lessons: data.lessons,
         homework: data.homework,
         overrides: data.overrides,
+        news: data.news,
       }),
     )
   } catch {
@@ -76,6 +77,7 @@ function loadOfflineSnap() {
       lessons: raw.lessons || [],
       homework: raw.homework || [],
       overrides: raw.overrides || [],
+      news: raw.news || [],
       audit: [],
       remote: false,
       offline: true,
@@ -260,6 +262,7 @@ function buildLocalSeed() {
     lessons,
     overrides: [],
     homework: [],
+    news: [],
     audit: [],
     remote: false,
   }
@@ -428,6 +431,7 @@ function baseFromSeedAndSnap() {
     lessons: snap?.lessons?.length ? snap.lessons : seed.lessons,
     homework: snap?.homework || [],
     overrides: snap?.overrides || [],
+    news: snap?.news || [],
     audit: [],
     remote: true,
     offline: false,
@@ -2658,6 +2662,80 @@ export async function fetchAuditLog(limit = 80) {
 
 export function getSemesterLabel() {
   return db.semesterLabel || ''
+}
+
+/* ── Новости колледжа ────────────────────────────────────────────── */
+
+function mapNewsRow(n) {
+  return {
+    id: n.id,
+    groupId: n.groupId || n.groupid || null,
+    title: n.title || '',
+    body: n.body || '',
+    attachments: normalizeAttachments(n.attachments),
+    author: n.author || '',
+    pinned: !!(n.pinned),
+    createdAt: n.createdAt || n.createdat || '',
+  }
+}
+
+/** Новости для группы: общие + её собственные. Сортировка — закреплённые, потом свежие. */
+export function getNews(groupId = null) {
+  return (db.news || []).filter((n) => !n.groupId || n.groupId === groupId)
+}
+
+export async function refreshNews(groupId = null) {
+  if (!supabaseConfigured || !supabase) return getNews(groupId)
+  const { data, error } = await supabase.rpc('rasp_news', {
+    p_group_id: groupId || null,
+    p_limit: 40,
+  })
+  if (error) throw new Error(rpcErrorMessage(error))
+  let rows = data
+  if (typeof rows === 'string') {
+    try {
+      rows = JSON.parse(rows)
+    } catch {
+      rows = []
+    }
+  }
+  if (!Array.isArray(rows)) rows = []
+  db.news = rows.map(mapNewsRow)
+  saveOfflineSnap(db)
+  return getNews(groupId)
+}
+
+/** Публикация. p_group_id = null — для всех групп. */
+export async function addNews({ groupId = null, title, body = '', attachments = [], pinned = false }) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token) throw new Error('Нужен вход старосты или админа')
+  const { data, error } = await supabase.rpc('rasp_add_news', {
+    p_token: session.token,
+    p_group_id: groupId || null,
+    p_title: title,
+    p_body: body,
+    p_attachments: attachments.map((a) => ({ url: a.url, name: a.name || 'файл', mime: a.mime || '' })),
+    p_pinned: !!pinned,
+  })
+  if (error) throw new Error(rpcErrorMessage(error))
+  await refreshNews(groupId)
+  await notifyPeers('news')
+  return data
+}
+
+export async function deleteNews(id) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token) throw new Error('Нужен вход')
+  const { error } = await supabase.rpc('rasp_delete_news', {
+    p_token: session.token,
+    p_id: id,
+  })
+  if (error) throw new Error(rpcErrorMessage(error))
+  db.news = (db.news || []).filter((n) => n.id !== id)
+  saveOfflineSnap(db)
+  await notifyPeers('news')
 }
 
 export function isSiteEnabled() {

@@ -50,9 +50,14 @@ export async function listStudents(groupId) {
  * Одногруппники текущего пользователя (только имя и роль).
  * Доступно любому вошедшему — в отличие от listStudents, которая требует прав редактора.
  */
-export async function groupmates() {
+export async function groupmates(groupId) {
   const session = getSession()
-  const res = await rpc('rasp_groupmates', { p_token: session.token })
+  const res = await rpc('rasp_groupmates', {
+    p_token: session.token,
+    // У админа и у кода «все группы» в сессии group_id = null, поэтому
+    // группу передаём явно — иначе сервер не знает, кого показывать.
+    p_group_id: groupId || null,
+  })
   const me = res?.me || null
   return {
     groupId: res?.groupId || res?.groupid || '',
