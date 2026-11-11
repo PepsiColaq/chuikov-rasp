@@ -819,23 +819,7 @@ function renderDays() {
           }
         },
       }),
-      state.tab === 'schedule'
-        ? el('button', {
-            type: 'button',
-            className: state.calendarOpen ? 'week-nav-btn is-on' : 'week-nav-btn',
-            text: '▦',
-            title: 'Календарь на месяц',
-            onClick: () => {
-              hapticTap()
-              state.calendarOpen = !state.calendarOpen
-              state.calendarMonthOffset = 0
-              if (!refreshTabPanes(['schedule'])) render({ force: true })
-              else softUpdateNav()
-            },
-          })
-        : null,
     ]),
-    state.tab === 'schedule' && state.calendarOpen ? renderMonthCalendar() : null,
     el(
       'div',
       { className: 'days' },
@@ -6430,10 +6414,6 @@ function renderHome() {
   const status = getScheduleNowStatus(group.id, today, todayLessons)
   wrap.append(renderHomeNow(status, group))
 
-  // —— Лента: последние события колледжа и группы
-  const feed = renderHomeFeed(group)
-  if (feed) wrap.append(feed)
-
   // —— ДЗ на сегодня
   const hwToday = getHomework(group.id).filter(
     (h) => !isFormationSkipHw(h) && h.dueDate === today,
@@ -6515,6 +6495,155 @@ function relativeTime(iso) {
 }
 
 /**
+ * Просмотр события: полноэкранный лист с фото, полным заголовком и текстом.
+ * Отдельно от лайтбокса ДЗ — там только картинки, а тут ещё и содержание.
+ */
+function openNewsReader(items, startIndex = 0) {
+  if (!items?.length) return
+  let index = Math.max(0, Math.min(startIndex, items.length - 1))
+  closeHwLightbox({ animate: false })
+
+  const overlay = el('div', {
+    className: 'news-reader',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': 'Событие',
+  })
+  const sheet = el('div', { className: 'news-reader-sheet' })
+
+  const close = () => {
+    overlay.classList.add('is-closing')
+    document.documentElement.classList.remove('news-reader-open')
+    window.setTimeout(() => overlay.remove(), 220)
+  }
+
+  const paint = () => {
+    const item = items[index]
+    const images = (item.attachments || []).filter(
+      (a) => /^image\//i.test(a.mime || '') || /\.(jpe?g|png|webp|gif)$/i.test(a.url || ''),
+    )
+    const canEditNews = canEdit(state.groupId) || getSession()?.role === 'admin'
+
+    const gallery = images.length
+      ? el(
+          'div',
+          { className: 'news-reader-gallery' },
+          images.map((a, i) =>
+            el('img', {
+              className: 'news-reader-photo',
+              src: a.url,
+              alt: item.title || '',
+              loading: i === 0 ? 'eager' : 'lazy',
+              decoding: 'async',
+              onClick: () => {
+                hapticTap()
+                openHwLightbox(images.map((x) => x.url), i)
+              },
+            }),
+          ),
+        )
+      : null
+
+    sheet.replaceChildren(
+      el('div', { className: 'news-reader-grab', 'aria-hidden': 'true' }),
+      gallery,
+      el('div', { className: 'news-reader-body' }, [
+        el('div', { className: 'news-reader-tags' }, [
+          item.pinned ? el('span', { className: 'news-reader-pin', text: 'главное' }) : null,
+          items.length > 1
+            ? el('span', { className: 'news-reader-counter', text: `${index + 1} из ${items.length}` })
+            : null,
+        ]),
+        el('h2', { className: 'news-reader-title', text: item.title }),
+        el('p', {
+          className: 'news-reader-meta',
+          text: [item.author, item.createdAt ? relativeTime(item.createdAt) : ''].filter(Boolean).join(' · '),
+        }),
+        item.body
+          ? el('p', { className: 'news-reader-text', text: item.body })
+          : el('p', { className: 'news-reader-text muted', text: 'Без подробностей.' }),
+        el('div', { className: 'news-reader-actions' }, [
+          items.length > 1
+            ? el('button', {
+                type: 'button',
+                className: 'btn secondary',
+                text: '‹ Предыдущее',
+                disabled: index === 0,
+                onClick: () => {
+                  if (index === 0) return
+                  index -= 1
+                  state.newsIndex = index
+                  paint()
+                  sheet.scrollTop = 0
+                },
+              })
+            : null,
+          items.length > 1
+            ? el('button', {
+                type: 'button',
+                className: 'btn secondary',
+                text: 'Следующее ›',
+                disabled: index >= items.length - 1,
+                onClick: () => {
+                  if (index >= items.length - 1) return
+                  index += 1
+                  state.newsIndex = index
+                  paint()
+                  sheet.scrollTop = 0
+                },
+              })
+            : null,
+          canEditNews
+            ? el('button', {
+                type: 'button',
+                className: 'btn btn-ghost news-reader-del',
+                text: 'Удалить',
+                onClick: async () => {
+                  if (!confirm(`Удалить «${item.title}»?`)) return
+                  try {
+                    await deleteNews(item.id)
+                    showToast('Событие удалено')
+                    close()
+                    state.newsIndex = 0
+                    if (!refreshTabPanes(['home'])) render({ force: true })
+                  } catch (err) {
+                    showToast(err.message, true)
+                  }
+                },
+              })
+            : null,
+        ]),
+      ]),
+    )
+  }
+  paint()
+
+  overlay.append(
+    el('button', {
+      type: 'button',
+      className: 'news-reader-close',
+      text: '✕',
+      'aria-label': 'Закрыть',
+      onClick: close,
+    }),
+    sheet,
+  )
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close()
+  })
+  const onKey = (e) => {
+    if (e.key === 'Escape') close()
+  }
+  document.addEventListener('keydown', onKey, { once: true })
+  overlay.addEventListener('remove', () => document.removeEventListener('keydown', onKey))
+
+  document.body.append(overlay)
+  document.documentElement.classList.add('news-reader-open')
+  if (motionOk()) requestAnimationFrame(() => overlay.classList.add('is-open'))
+  else overlay.classList.add('is-open')
+}
+
+/**
  * Карусель событий на главной — как в МГЮА: фото во всю ширину, подпись поверх,
  * листается пальцем, точки внизу. Первое, что видит студент, — картинка события.
  */
@@ -6570,7 +6699,16 @@ function renderHomeHero(group) {
     const photo = images[0]
     return el(
       'article',
-      { className: 'home-hero-slide', dataset: { slide: String(i) } },
+      {
+        className: 'home-hero-slide',
+        dataset: { slide: String(i) },
+        onClick: () => {
+          // Свайп не должен открывать событие: тащим — молчим, тапнули — открываем.
+          if (Number(track.dataset.moved || 0) > 8) return
+          hapticTap()
+          openNewsReader(items, i)
+        },
+      },
       [
         photo
           ? el('img', {
@@ -6579,11 +6717,6 @@ function renderHomeHero(group) {
               alt: item.title || '',
               loading: i === 0 ? 'eager' : 'lazy',
               decoding: 'async',
-              onClick: () => {
-                if (Math.abs(track.dataset.moved | 0) > 50) return
-                hapticTap()
-                openHwLightbox(images.map((a) => a.url), 0)
-              },
             })
           : el('div', { className: 'home-hero-img home-hero-img-blank', 'aria-hidden': 'true' }),
         el('div', { className: 'home-hero-veil', 'aria-hidden': 'true' }),
@@ -6591,6 +6724,7 @@ function renderHomeHero(group) {
           item.pinned ? el('span', { className: 'home-hero-pin', text: 'главное' }) : null,
           el('p', { className: 'home-hero-caption-title', text: item.title }),
           item.body ? el('p', { className: 'home-hero-caption-text', text: item.body }) : null,
+          el('span', { className: 'home-hero-more', text: 'читать полностью' }),
         ]),
       ],
     )
@@ -6755,18 +6889,27 @@ function renderNewsComposer(group) {
   const isAdmin = getSession()?.role === 'admin'
   const card = el('section', { className: 'card news-compose' })
 
-  const title = el('input', {
-    type: 'text',
+  const title = el('textarea', {
+    className: 'news-compose-grow',
     maxlength: '120',
+    rows: '1',
     placeholder: 'Заголовок — «Экскурсия 20 ноября»',
-    value: draft.title,
   })
+  title.value = draft.title
   const body = el('textarea', {
+    className: 'news-compose-grow',
     maxlength: '4000',
-    rows: '4',
+    rows: '3',
     placeholder: 'Подробности: что, где, когда, кого касается…',
   })
   body.value = draft.body
+
+  // Поле растёт под текст: видно всё сразу, без прокрутки внутри рамки.
+  const grow = (node) => {
+    node.style.height = 'auto'
+    node.style.height = `${node.scrollHeight}px`
+  }
+
   const file = el('input', {
     type: 'file',
     accept: 'image/jpeg,image/png,image/webp,image/gif',
@@ -6807,9 +6950,22 @@ function renderNewsComposer(group) {
   // Черновик пишем сразу — тогда даже случайная перерисовка не сотрёт ввод.
   title.addEventListener('input', () => {
     draft.title = title.value
+    grow(title)
   })
   body.addEventListener('input', () => {
     draft.body = body.value
+    grow(body)
+  })
+  // Enter в заголовке — переход к тексту: заголовок однострочный по смыслу.
+  title.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      body.focus()
+    }
+  })
+  requestAnimationFrame(() => {
+    grow(title)
+    grow(body)
   })
   pinned.addEventListener('change', () => {
     draft.pinned = pinned.checked
@@ -6899,117 +7055,6 @@ function renderNewsComposer(group) {
   )
   return card
 }
-
-/**
- * Лента событий группы: свежие ДЗ и замены.
- * Источник — уже загруженное состояние, поэтому лента появляется мгновенно
- * и обновляется вместе с ДЗ, без отдельного запроса.
- */
-function buildHomeFeed(group) {
-  const items = []
-  const today = todayISO()
-
-  for (const h of getHomework(group.id)) {
-    if (isFormationSkipHw(h)) continue
-    if (!h.createdAt) continue
-    items.push({
-      kind: 'hw',
-      at: h.createdAt,
-      title: h.subject || 'Домашнее задание',
-      text: h.text || '',
-      meta: h.authorLabel ? `${h.authorLabel} · ${relativeTime(h.createdAt)}` : relativeTime(h.createdAt),
-      overdue: !!h.dueDate && h.dueDate < today,
-      due: h.dueDate ? `сдать ${formatDateRu(h.dueDate)}` : '',
-    })
-  }
-
-  for (const o of getDb()?.overrides || []) {
-    if (o.groupId !== group.id) continue
-    if (!o.date || o.date < today) continue
-    const lesson = getLessons(group.id).find((l) => l.id === o.lessonId)
-    items.push({
-      kind: 'override',
-      at: `${o.date}T00:00:00`,
-      title: typeLabel(o.type),
-      text: [lesson?.subject, o.newSubject ? `→ ${o.newSubject}` : '', o.newRoom ? `ауд. ${o.newRoom}` : '']
-        .filter(Boolean)
-        .join(' · '),
-      meta: `${formatDateRu(o.date)}${lesson?.start ? ` · ${lesson.start}` : ''}`,
-      due: '',
-    })
-  }
-
-  // Сортировка по свежести ставила бы замену через месяц выше ДЗ, заданного час назад.
-  // Для студента важнее то, что ближе к сегодня, поэтому считаем расстояние в днях.
-  const dayDiff = (iso) => {
-    const t = Date.parse(String(iso).slice(0, 10) + 'T12:00:00')
-    if (!Number.isFinite(t)) return 999
-    return Math.abs(Math.round((t - new Date(`${today}T12:00:00`).getTime()) / 86400000))
-  }
-  items.sort((a, b) => dayDiff(a.at) - dayDiff(b.at) || String(b.at).localeCompare(String(a.at)))
-  return items.slice(0, 6)
-}
-
-/** Лента «Последние события» на главной. Пусто — блока нет. */
-function renderHomeFeed(group) {
-  const items = buildHomeFeed(group)
-  if (!items.length) return null
-
-  return el('section', { className: 'card home-feed' }, [
-    el('div', { className: 'home-card-head' }, [
-      el('h3', { text: 'Домашка и замены' }),
-      el('button', {
-        type: 'button',
-        className: 'home-feed-more',
-        text: 'Всё',
-        onClick: () => gotoTab('grades', { animate: true }),
-      }),
-    ]),
-    el(
-      'div',
-      { className: 'home-feed-list' },
-      items.map((it) =>
-        el(
-          'button',
-          {
-            type: 'button',
-            className: `home-feed-row is-${it.kind}`,
-            onClick: () => {
-              if (it.kind === 'hw') {
-                state.studyMode = 'hw'
-                gotoTab('grades', { animate: true })
-              } else {
-                state.moreScreen = 'overrides'
-                gotoTab('overrides', { animate: true })
-              }
-            },
-          },
-          [
-            el('span', {
-              className: 'home-feed-ico',
-              'aria-hidden': 'true',
-              innerHTML:
-                it.kind === 'hw'
-                  ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M8 4h8a2 2 0 0 1 2 2v14H6V6a2 2 0 0 1 2-2z"/><path d="M9 2.5h6v3H9z"/><path d="M9 11h6M9 15h4"/></svg>'
-                  : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 8h13M4 8l3-3M4 8l3 3M20 16H7M20 16l-3-3M20 16l-3 3"/></svg>',
-            }),
-            el('span', { className: 'home-feed-body' }, [
-              el('span', { className: 'home-feed-title', text: it.title }),
-              it.text ? el('span', { className: 'home-feed-text', text: shortSubjectLabel(it.text, 90) }) : null,
-              el('span', { className: 'home-feed-meta' }, [
-                el('span', { text: it.meta }),
-                it.due
-                  ? el('span', { className: `home-feed-due${it.overdue ? ' is-overdue' : ''}`, text: it.due })
-                  : null,
-              ]),
-            ]),
-          ],
-        ),
-      ),
-    ),
-  ])
-}
-
 
 /** Карточка «идёт сейчас / следующая пара / на сегодня всё». */
 function renderHomeNow(status, group) {
@@ -7449,7 +7494,7 @@ function swipeCanStart(target) {
   if (isEditingFormNow()) return false
   if (!isSiteEnabled() && getSession()?.role !== 'admin') return false
   if (!(target instanceof Element)) return true
-  if (target.closest('nav.nav, input, textarea, select, button, a, label, .hw-lightbox, .home-hero')) return false
+  if (target.closest('nav.nav, input, textarea, select, button, a, label, .hw-lightbox, .home-hero, .news-reader')) return false
   return true
 }
 
@@ -8294,7 +8339,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=135`, { scope: base })
+    .register(`${base}sw.js?v=137`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
