@@ -3433,3 +3433,81 @@ html.ptr-on body {
     max-width: 800px;
   }
 }
+
+/* Личный кабинет: сводка студента */
+.cabinet-card {
+  margin-top: 12px;
+}
+
+.cabinet-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.cabinet-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.cabinet-head .muted {
+  font-size: 13px;
+  text-align: right;
+}
+
+.cabinet-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cabinet-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: center;
+  min-width: 0;
+}
+
+.cabinet-stat strong {
+  font-size: 20px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.cabinet-stat span {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--muted);
+}
+
+.cabinet-stat.is-avg strong {
+  color: var(--accent);
+}
+
+.cabinet-stat.is-bad strong {
+  color: #b42318;
+}
+
+.cabinet-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.cabinet-actions .btn {
+  flex: 1 1 auto;
+}
+
+@media (max-width: 420px) {
+  .cabinet-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
