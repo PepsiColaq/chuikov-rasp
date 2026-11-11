@@ -2675,13 +2675,19 @@ function mapNewsRow(n) {
     attachments: normalizeAttachments(n.attachments),
     author: n.author || '',
     pinned: !!(n.pinned),
+    sortOrder: Number(n.sortOrder ?? n.sortorder ?? 0) || 0,
     createdAt: n.createdAt || n.createdat || '',
   }
 }
 
-/** Новости для группы: общие + её собственные. Сортировка — закреплённые, потом свежие. */
+/** Новости для группы: общие + её собственные. Закреплённые, затем ручной порядок, затем свежие. */
 export function getNews(groupId = null) {
-  return (db.news || []).filter((n) => !n.groupId || n.groupId === groupId)
+  const list = (db.news || []).filter((n) => !n.groupId || n.groupId === groupId)
+  return list.slice().sort((a, b) => {
+    if (!!b.pinned !== !!a.pinned) return b.pinned ? 1 : -1
+    if ((b.sortOrder || 0) !== (a.sortOrder || 0)) return (b.sortOrder || 0) - (a.sortOrder || 0)
+    return String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+  })
 }
 
 export async function refreshNews(groupId = null) {
@@ -2736,6 +2742,22 @@ export async function deleteNews(id) {
   db.news = (db.news || []).filter((n) => n.id !== id)
   saveOfflineSnap(db)
   await notifyPeers('news')
+}
+
+/** Сдвинуть новость в списке: dir = -1 — выше, 1 — ниже. */
+export async function moveNews(id, dir, groupId = null) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token) throw new Error('Нужен вход')
+  const { data, error } = await supabase.rpc('rasp_move_news', {
+    p_token: session.token,
+    p_id: id,
+    p_dir: dir === 1 ? -1 : 1,
+  })
+  if (error) throw new Error(rpcErrorMessage(error))
+  await refreshNews(groupId)
+  await notifyPeers('news')
+  return data
 }
 
 export function isSiteEnabled() {
