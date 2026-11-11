@@ -59,6 +59,9 @@ import { breakMinutes, DAY_NAMES, DAY_SHORT } from './data/seed.js'
   findTeacherUpcoming,
   listDayPairSlots,
   findFreeRooms,
+  suggestRooms,
+  findRoomSlots,
+  listScheduleRooms,
   canUseFreeRooms,
   setCodeFreeRooms,
   banStarostaCode,
@@ -124,6 +127,10 @@ const state = {
   legalDoc: null,
   teacherQuery: '',
   teacherDate: '',
+  /** 'teacher' | 'room' — что ищем во вкладке «Преп.» */
+  teacherMode: 'teacher',
+  roomQuery: '',
+  roomDate: '',
   /** Админ: дата для свободных аудиторий */
   freeRoomsDate: '',
   /** Слот пары «HH:MM|HH:MM» */
@@ -697,7 +704,7 @@ function tabLeadText(tab, group) {
   if (tab === 'grades') return 'Оценки'
   if (tab === 'overrides') return 'Замены'
   if (tab === 'more') return 'Профиль и настройки'
-  if (tab === 'teachers') return 'Преподаватели'
+  if (tab === 'teachers') return 'Поиск: преподаватель или аудитория'
   if (tab === 'hw') return 'Домашнее задание'
   return ''
 }
@@ -780,6 +787,27 @@ function renderDays() {
   ])
 }
 
+/** Кликабельный номер аудитории: открывает вкладку «Преп.» в режиме аудитории. */
+function roomLink(room) {
+  const value = String(room || '').trim()
+  if (!value) return null
+  return el('button', {
+    type: 'button',
+    className: 'room-link',
+    text: `ауд. ${value}`,
+    title: 'Показать, кто ещё в этом кабинете',
+    onClick: (e) => {
+      e.stopPropagation()
+      e.preventDefault()
+      state.teacherMode = 'room'
+      state.roomQuery = value
+      state.roomDate = todayISO()
+      state.tab = 'teachers'
+      render({ force: true })
+    },
+  })
+}
+
 function lessonMeta(lesson, view) {
   if (view.cancelled) {
     return el('div', { className: 'lesson-meta' }, [
@@ -789,14 +817,16 @@ function lessonMeta(lesson, view) {
   if (view.overrideType === 'room_only') {
     return el('div', { className: 'lesson-meta' }, [
       el('span', { className: 'strike', text: `ауд. ${view.oldRoom || '—'}` }),
-      textNode(` → ауд. ${view.effectiveRoom} `),
+      textNode(' → '),
+      roomLink(view.effectiveRoom) || textNode(`ауд. ${view.effectiveRoom} `),
       el('span', { className: 'badge warn', text: 'замена' }),
     ])
   }
   if (view.overrideType === 'subject' || view.overrideType === 'subject_and_room') {
     return el('div', { className: 'lesson-meta' }, [
       textNode(view.oldSubject ? `было: ${view.oldSubject}` : ''),
-      view.effectiveRoom ? textNode(` · ауд. ${view.effectiveRoom} `) : textNode(' '),
+      view.effectiveRoom ? textNode(' · ') : textNode(' '),
+      view.effectiveRoom ? roomLink(view.effectiveRoom) : null,
       el('span', { className: 'badge warn', text: 'замена' }),
     ])
   }
@@ -806,13 +836,13 @@ function lessonMeta(lesson, view) {
       lesson.teacher ? textNode(` · ${lesson.teacher}`) : null,
     ])
   }
-  const bits = []
-  if (view.effectiveRoom) bits.push(`ауд. ${view.effectiveRoom}`)
-  if (lesson.teacher) bits.push(lesson.teacher)
-  return el('div', {
-    className: 'lesson-meta',
-    text: bits.length ? bits.join(' · ') : 'кабинет не указан',
-  })
+  const nodes = []
+  const link = roomLink(view.effectiveRoom)
+  if (link) nodes.push(link)
+  if (lesson.teacher) nodes.push(textNode(`${link ? ' · ' : ''}${lesson.teacher}`))
+  return el('div', { className: 'lesson-meta' }, [
+    nodes.length ? nodes : [textNode('кабинет не указан')],
+  ])
 }
 
 function safeStorageUrl(url) {
@@ -2812,8 +2842,225 @@ function renderTeacherSlotCard(s) {
 }
 
 function renderTeachersTab() {
-  if (!state.teacherDate) state.teacherDate = todayISO()
+  const mode = state.teacherMode === 'room' ? 'room' : 'teacher'
   const panel = el('div', { className: 'panel' })
+
+  const switchRow = el('div', { className: 'due-quick' }, [
+    el('button', {
+      type: 'button',
+      className: `chip${mode === 'teacher' ? ' chip-active' : ''}`,
+      text: 'Преподаватель',
+      onClick: () => {
+        if (mode === 'teacher') return
+        state.teacherMode = 'teacher'
+        render({ force: true })
+      },
+    }),
+    el('button', {
+      type: 'button',
+      className: `chip${mode === 'room' ? ' chip-active' : ''}`,
+      text: 'Аудитория',
+      onClick: () => {
+        if (mode === 'room') return
+        state.teacherMode = 'room'
+        render({ force: true })
+      },
+    }),
+  ])
+  panel.append(el('div', { className: 'card teacher-search teacher-mode' }, [switchRow]))
+
+  panel.append(mode === 'room' ? renderRoomSearch() : renderTeacherSearch())
+  return panel
+}
+
+/** Кто в какой аудитории: поиск по номеру кабинета. */
+function renderRoomSearch() {
+  if (!state.roomDate) state.roomDate = todayISO()
+  const wrap = el('div', {})
+  const results = el('div', { className: 'teacher-results' })
+
+  const input = el('input', {
+    type: 'search',
+    id: 'room-query-input',
+    value: state.roomQuery || '',
+    placeholder: 'Например, 210',
+    autocomplete: 'off',
+    enterKeyHint: 'search',
+  })
+  const dateInput = el('input', {
+    type: 'date',
+    id: 'room-date-input',
+    value: state.roomDate,
+  })
+  const dateLabel = el('label', { text: teacherDateLabel(state.roomDate) })
+
+  const syncState = () => {
+    state.roomQuery = input.value
+    state.roomDate = dateInput.value || todayISO()
+  }
+
+  const paintResults = () => {
+    syncState()
+    dateLabel.textContent = teacherDateLabel(state.roomDate)
+    results.replaceChildren(...buildRoomResultsNodes(input, dateInput, paintResults))
+  }
+
+  input.addEventListener('input', () => paintResults())
+  dateInput.addEventListener('change', () => paintResults())
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      paintResults()
+    }
+  })
+
+  wrap.append(
+    el('div', { className: 'card teacher-search' }, [
+      el('h3', { text: 'Кто в аудитории' }),
+      el('p', {
+        className: 'muted',
+        text: 'Введи номер кабинета — увидишь, какие группы и пары там по расписанию в выбранный день, с учётом замен.',
+      }),
+      el('div', { className: 'field' }, [el('label', { text: 'Аудитория' }), input]),
+      el('div', { className: 'field' }, [dateLabel, dateInput]),
+      el('div', { className: 'due-quick' }, [
+        el('button', {
+          type: 'button',
+          className: 'chip',
+          text: 'Сегодня',
+          onClick: () => {
+            state.roomDate = todayISO()
+            dateInput.value = state.roomDate
+            paintResults()
+          },
+        }),
+      ]),
+    ]),
+    results,
+  )
+  paintResults()
+  return wrap
+}
+
+function buildRoomResultsNodes(input, dateInput, paintResults) {
+  const q = (state.roomQuery || '').trim()
+  const dateStr = state.roomDate || todayISO()
+  const nodes = []
+
+  if (q.length < 1) {
+    nodes.push(
+      el('p', {
+        className: 'muted',
+        text: 'Введите номер кабинета — например, 210 или спортзал.',
+      }),
+    )
+    const rooms = listScheduleRooms()
+    if (rooms.length) {
+      // быстрые чипы популярных кабинетов
+      nodes.push(
+        el(
+          'div',
+          { className: 'teacher-suggest' },
+          rooms.slice(0, 10).map((room) =>
+            el('button', {
+              type: 'button',
+              className: 'chip',
+              text: room,
+              onClick: () => {
+                state.roomQuery = room
+                input.value = room
+                paintResults()
+              },
+            }),
+          ),
+        ),
+      )
+    }
+    return nodes
+  }
+
+  const suggestions = suggestRooms(q, 10)
+  if (suggestions.length) {
+    nodes.push(
+      el(
+        'div',
+        { className: 'teacher-suggest' },
+        suggestions.map((room) =>
+          el('button', {
+            type: 'button',
+            className: `chip${normalizeSuggestKey(room) === normalizeSuggestKey(q) ? ' chip-active' : ''}`,
+            text: room,
+            onClick: () => {
+              state.roomQuery = room
+              input.value = room
+              paintResults()
+            },
+          }),
+        ),
+      ),
+    )
+  }
+
+  const { dayNum, slots } = findRoomSlots(q, dateStr)
+  const active = slots.filter((s) => !s.cancelled)
+
+  if (dayNum === 7) {
+    nodes.push(el('div', { className: 'empty', text: 'В воскресенье пар в расписании нет.' }))
+    return nodes
+  }
+  if (!slots.length) {
+    nodes.push(
+      el('div', {
+        className: 'empty',
+        text: `Аудитория «${q}» на ${formatDateRu(dateStr)} (${DAY_NAMES[dayNum] || 'день'}) в расписании не занята.`,
+      }),
+    )
+    return nodes
+  }
+
+  nodes.push(
+    el('p', {
+      className: 'muted',
+      text: `${DAY_NAMES[dayNum] || ''} · ${formatDateRu(dateStr)} · пар в этом кабинете: ${active.length}`,
+    }),
+  )
+
+  // группируем по номеру кабинета — при частичном совпадении их может быть несколько
+  const byRoom = new Map()
+  for (const s of slots) {
+    if (!byRoom.has(s.room)) byRoom.set(s.room, [])
+    byRoom.get(s.room).push(s)
+  }
+  for (const [room, list] of byRoom) {
+    nodes.push(el('h3', { style: 'margin:14px 0 6px;font-size:15px', text: `Аудитория ${room}` }))
+    for (const s of list) nodes.push(renderRoomSlotCard(s))
+  }
+  return nodes
+}
+
+function renderRoomSlotCard(s) {
+  const meta = []
+  if (s.cancelled) meta.push(el('span', { className: 'badge warn', text: 'пары не будет' }))
+  else if (s.overrideType === 'room_only') meta.push(el('span', { className: 'badge warn', text: 'кабинет заменён' }))
+  else if (s.subjectChanged) meta.push(el('span', { className: 'badge warn', text: 'замена предмета' }))
+  return el('div', { className: `card teacher-slot${s.cancelled ? ' cancelled' : ''}` }, [
+    el('div', { className: 'teacher-slot-top' }, [
+      el('strong', { text: `${s.start}–${s.end}` }),
+      el('span', { className: 'muted', text: s.groupName || 'группа' }),
+    ]),
+    el('div', { text: s.subject }),
+    el('div', {
+      className: 'muted',
+      text: [s.teacher ? s.teacher : '', s.remote ? 'дистанционно' : ''].filter(Boolean).join(' · '),
+    }),
+    meta.length ? el('div', { className: 'lesson-meta', style: 'margin-top:6px' }, meta) : null,
+    s.note ? el('p', { className: 'muted', style: 'margin:6px 0 0;font-size:13px', text: s.note }) : null,
+  ])
+}
+
+function renderTeacherSearch() {
+  if (!state.teacherDate) state.teacherDate = todayISO()
+  const panel = el('div', {})
   const results = el('div', { className: 'teacher-results' })
 
   const input = el('input', {
@@ -5497,7 +5744,7 @@ function renderNav() {
     { id: 'schedule', label: 'Пары' },
     { id: 'grades', label: 'Оценки' },
     { id: 'hw', label: 'ДЗ' },
-    { id: 'teachers', label: 'Преп.' },
+    { id: 'teachers', label: 'Поиск' },
     { id: 'overrides', label: 'Замены' },
     { id: 'more', label: 'Ещё' },
   ]
@@ -6676,7 +6923,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=127`, { scope: base })
+    .register(`${base}sw.js?v=128`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
