@@ -6087,6 +6087,17 @@ function journalCtx() {
     formatDateRu,
     dateForWeekday,
     weekdayFromISO,
+    /** Сменить день прямо из журнала, без прыжка на «Пары». */
+    setDay: (d) => {
+      const prev = Number(state.day)
+      const next = Number(d)
+      if (!next || next === prev) return
+      if (DAY_SWAP_MOTION && motionOk()) state.daySwap = next > prev ? 'right' : 'left'
+      else state.daySwap = null
+      state.day = next
+      refreshTabPanes(['grades', 'schedule'])
+      softUpdateNav()
+    },
   }
 }
 
@@ -7026,7 +7037,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=128`, { scope: base })
+    .register(`${base}sw.js?v=129`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда

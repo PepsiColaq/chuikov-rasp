@@ -17,6 +17,7 @@ import {
   setStudentRole,
   upsertMark,
 } from './lib/journal.js'
+import { DAY_SHORT } from './data/seed.js'
 import { getSession } from './lib/store.js'
 
 let journalError = ''
@@ -85,14 +86,39 @@ function renderEditorGradesHome(ctx) {
   }
   const date = ctx.dateForWeekday(ctx.state.day)
   const lessons = ctx.getLessons(group.id).filter((l) => Number(l.day) === Number(ctx.state.day))
+
+  // Свой переключатель дней: раньше день менялся только на вкладке «Пары».
+  const hasSat = ctx.getLessons(group.id, 6).length > 0
+  const dayChips = el(
+    'div',
+    { className: 'due-quick journal-days' },
+    (hasSat ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]).map((d) =>
+      el('button', {
+        type: 'button',
+        className: `chip${Number(ctx.state.day) === d ? ' chip-active' : ''}`,
+        text: DAY_SHORT[d],
+        onClick: () => {
+          if (Number(ctx.state.day) === d) return
+          ctx.setDay(d)
+        },
+      }),
+    ),
+  )
+
   const box = el('div', { className: 'card journal-day' }, [
     el('div', { className: 'journal-day-top' }, [
       el('h3', { text: group.name }),
       el('span', { className: 'muted', text: ctx.formatDateRu(date) }),
     ]),
+    dayChips,
   ])
   if (!lessons.length) {
-    box.append(el('p', { className: 'muted', text: 'В этот день пар нет. День меняется на вкладке «Пары».' }))
+    box.append(
+      el('p', {
+        className: 'muted',
+        text: 'В этот день пар нет — выбери другой день выше.',
+      }),
+    )
     return box
   }
   lessons.forEach((lesson, idx) => {

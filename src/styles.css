@@ -999,6 +999,20 @@ html[data-theme='dark'] .now-strip-bar {
   padding: 1px 6px;
 }
 
+/* Дни недели внутри журнала */
+.journal-days {
+  margin-top: 10px;
+  margin-bottom: 2px;
+  gap: 6px;
+}
+
+.journal-days .chip {
+  padding: 5px 10px;
+  font-size: 12px;
+  min-width: 38px;
+  text-align: center;
+}
+
 .journal-controls {
   display: flex;
   flex-wrap: wrap;
