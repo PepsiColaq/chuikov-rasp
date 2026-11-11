@@ -4130,3 +4130,93 @@ html[data-theme='dark'] .home-feed-due.is-overdue {
   margin: 1px 0 0;
   accent-color: var(--accent);
 }
+
+/* ── «Итоговые» в дневнике студента ──────────────────────────── */
+.final-summary {
+  padding: 14px 14px 12px;
+}
+
+.final-summary-top {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  text-align: center;
+}
+
+.final-summary-label {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.final-summary-value {
+  display: block;
+  margin-top: 2px;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.final-summary-value.is-bad {
+  color: #c43737;
+}
+
+.final-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.final-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+}
+
+.final-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.final-subject {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.final-meta {
+  font-size: 11.5px;
+}
+
+.final-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex: 0 0 auto;
+}
+
+.final-avg {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.final-projected {
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+@media (max-width: 380px) {
+  .final-summary-value {
+    font-size: 19px;
+  }
+}

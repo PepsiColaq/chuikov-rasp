@@ -206,26 +206,135 @@ function renderStudentDiary(ctx, session) {
     switcher,
     renderOwnCodeForm(ctx),
   )
-  if (mode === 'final') {
-    wrap.append(
-      el('div', { className: 'card' }, [
-        el('h3', { text: 'Итоговые' }),
-        el('p', {
-          className: 'muted',
-          text: 'Итоги по семестрам добавим отдельно, когда текущие оценки уже будут ставиться. Свои текущие — на соседней кнопке.',
-        }),
-      ]),
-    )
-    return wrap
-  }
+
   const body = el('div', { text: 'Загружаем…' })
   wrap.append(body)
+  // Один запрос на оба режима: «Итоговые» считаются из тех же строк.
   listMyMarks()
-    .then((rows) => paintDiary(ctx, body, rows))
+    .then((rows) => {
+      if (mode === 'final') paintFinal(body, rows)
+      else paintDiary(ctx, body, rows)
+    })
     .catch((err) => {
-      body.replaceChildren(el('p', { className: 'muted', text: err.message || 'Не удалось загрузить оценки' }))
+      body.replaceChildren(
+        el('p', { className: 'muted', text: err.message || 'Не удалось загрузить оценки' }),
+      )
     })
   return wrap
+}
+
+/** Средний балл → предполагаемая итоговая. 4.5 и выше — 5, 3.5 — 4 и т.д. */
+function projectedGrade(avg) {
+  if (!Number.isFinite(avg)) return null
+  if (avg >= 4.5) return 5
+  if (avg >= 3.5) return 4
+  if (avg >= 2.5) return 3
+  return 2
+}
+
+/**
+ * «Итоговые»: сводка по предметам — средний балл, сколько оценок, прогноз и пропуски.
+ * Никаких новых запросов и таблиц: всё считается из тех же строк, что и текущие.
+ */
+function paintFinal(body, rows) {
+  const list = Array.isArray(rows) ? rows : []
+  if (!list.length) {
+    body.replaceChildren(
+      el('div', { className: 'empty', text: 'Пока нет оценок — итоговым неоткуда взяться.' }),
+    )
+    return
+  }
+
+  const bySubject = new Map()
+  for (const row of list) {
+    const key = String(row.subject || 'Предмет').trim() || 'Предмет'
+    if (!bySubject.has(key)) {
+      bySubject.set(key, { grades: [], absent: 0, total: 0 })
+    }
+    const acc = bySubject.get(key)
+    acc.total += 1
+    const att = String(row.attendance || 'present')
+    if (att === 'absent' || att === 'sick') acc.absent += 1
+    const n = Number(row.grade)
+    if (Number.isFinite(n) && n >= 2 && n <= 5) acc.grades.push(n)
+  }
+
+  const subjects = [...bySubject.entries()].map(([subject, acc]) => {
+    const avg = acc.grades.length
+      ? acc.grades.reduce((a, b) => a + b, 0) / acc.grades.length
+      : NaN
+    return { subject, avg, count: acc.grades.length, absent: acc.absent, total: acc.total }
+  })
+  // Сначала предметы с оценками (по убыванию среднего не сортируем — алфавит понятнее)
+  subjects.sort((a, b) => {
+    if (a.count && !b.count) return -1
+    if (!a.count && b.count) return 1
+    return a.subject.localeCompare(b.subject, 'ru')
+  })
+
+  const graded = subjects.filter((s) => Number.isFinite(s.avg))
+  const overall = graded.length
+    ? graded.reduce((sum, s) => sum + s.avg, 0) / graded.length
+    : NaN
+  const absentTotal = subjects.reduce((sum, s) => sum + s.absent, 0)
+
+  const card = (s) => {
+    const projected = projectedGrade(s.avg)
+    return el('div', { className: 'card final-row' }, [
+      el('div', { className: 'final-main' }, [
+        el('span', { className: 'final-subject', text: s.subject }),
+        el('span', {
+          className: 'final-meta muted',
+          text: [
+            s.count ? `${s.count} ${s.count === 1 ? 'оценка' : s.count < 5 ? 'оценки' : 'оценок'}` : 'оценок нет',
+            s.absent ? `пропусков: ${s.absent}` : '',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        }),
+      ]),
+      el('span', { className: 'final-side' }, [
+        el('span', {
+          className: `final-avg${projected ? ` grade-${projected}` : ''}`,
+          text: Number.isFinite(s.avg) ? s.avg.toFixed(2) : '—',
+        }),
+        el('span', {
+          className: 'final-projected muted',
+          text: projected ? `итог ≈ ${projected}` : 'нет данных',
+        }),
+      ]),
+    ])
+  }
+
+  body.replaceChildren(
+    el('div', { className: 'card final-summary' }, [
+      el('div', { className: 'final-summary-top' }, [
+        el('div', {}, [
+          el('span', { className: 'final-summary-label', text: 'Средний балл' }),
+          el('strong', {
+            className: 'final-summary-value',
+            text: Number.isFinite(overall) ? overall.toFixed(2) : '—',
+          }),
+        ]),
+        el('div', {}, [
+          el('span', { className: 'final-summary-label', text: 'Предметов' }),
+          el('strong', { className: 'final-summary-value', text: String(graded.length) }),
+        ]),
+        el('div', {}, [
+          el('span', { className: 'final-summary-label', text: 'Пропусков' }),
+          el('strong', {
+            className: `final-summary-value${absentTotal ? ' is-bad' : ''}`,
+            text: String(absentTotal),
+          }),
+        ]),
+      ]),
+      el('p', {
+        className: 'final-note muted',
+        text: 'Итог — это прогноз по среднему баллу, а не решение преподавателя. Округление: 4,5 и выше → 5.',
+      }),
+    ]),
+    ...subjects.map(card),
+  )
 }
 
 function paintDiary(ctx, body, rows) {
