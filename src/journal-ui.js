@@ -658,19 +658,21 @@ function renderStudentRow(ctx, spec, student, mark, byStudent, index, repaint) {
       extraOn ? el('span', { className: 'journal-tag', text: EXTRA_ATTS.find(([id]) => id === att)?.[1] || '' }) : null,
       personRest(student) ? el('span', { className: 'muted', text: personRest(student) }) : null,
     ]),
+    el('button', {
+      type: 'button',
+      className: `journal-more-btn${open || extraOn || (mark.comment || '').trim() ? ' on' : ''}`,
+      text: '⋯',
+      title: 'Комментарий и другие отметки',
+      'aria-label': open ? 'Свернуть' : 'Комментарий и другие отметки',
+      'aria-expanded': open ? 'true' : 'false',
+      onClick: () => {
+        ctx.state.journalNoteId = open ? '' : student.id
+        repaint()
+      },
+    }),
     el('div', { className: 'journal-controls' }, [
       seg(MAIN_ATTS),
       grades,
-      el('button', {
-        type: 'button',
-        className: `journal-more-btn${open || extraOn || (mark.comment || '').trim() ? ' on' : ''}`,
-        text: 'ещё',
-        title: 'Комментарий и другие отметки',
-        onClick: () => {
-          ctx.state.journalNoteId = open ? '' : student.id
-          repaint()
-        },
-      }),
     ]),
   ]
   if (open) {

@@ -107,6 +107,7 @@ const state = {
   highlightLogin: false,
   loginNeedWho: false,
   loginCodeDraft: '',
+  loginWhoDraft: '',
   legalDoc: null,
   teacherQuery: '',
   teacherDate: '',
@@ -4555,10 +4556,36 @@ function renderMoreV2() {
       id: 'more-login-code',
       value: state.loginCodeDraft || '',
       disabled: isLocalDeviceBanned() ? true : undefined,
+      enterKeyHint: 'go',
+    })
+    // Код не теряется при перерисовке: тосты и синк вызывают render() постоянно.
+    code.addEventListener('input', () => {
+      state.loginCodeDraft = code.value
+    })
+    const revealBtn = el('button', {
+      type: 'button',
+      className: 'journal-link login-reveal',
+      text: 'Показать',
+      onClick: () => {
+        const hidden = code.type === 'password'
+        code.type = hidden ? 'text' : 'password'
+        revealBtn.textContent = hidden ? 'Скрыть' : 'Показать'
+      },
     })
     const who = state.loginNeedWho
-      ? el('input', { type: 'text', maxlength: '64', placeholder: 'Фамилия', autocomplete: 'name' })
+      ? el('input', {
+          type: 'text',
+          maxlength: '64',
+          placeholder: 'Фамилия',
+          autocomplete: 'name',
+          value: state.loginWhoDraft || '',
+        })
       : null
+    if (who) {
+      who.addEventListener('input', () => {
+        state.loginWhoDraft = who.value
+      })
+    }
     form.append(
       el('h3', { text: 'Вход' }),
       el('p', {
@@ -4569,7 +4596,13 @@ function renderMoreV2() {
             ? 'Напиши фамилию — так поймём, чей это код.'
             : 'Код выдаёт админ.',
       }),
-      el('div', { className: 'field' }, [el('label', { text: 'Код доступа' }), code]),
+      el('div', { className: 'field' }, [
+        el('div', { className: 'field-head' }, [
+          el('label', { text: 'Код доступа' }),
+          revealBtn,
+        ]),
+        code,
+      ]),
       who ? el('div', { className: 'field' }, [el('label', { text: 'Фамилия' }), who]) : null,
       el('button', {
         className: 'btn',
@@ -4590,6 +4623,7 @@ function renderMoreV2() {
         state.highlightLogin = false
         state.loginNeedWho = false
         state.loginCodeDraft = ''
+        state.loginWhoDraft = ''
         const whoName = (s.label || '').trim() || (s.role === 'admin' ? 'Никитос' : 'староста')
         flash(`Вы вошли как ${whoName}`)
       } catch (err) {
@@ -4762,10 +4796,35 @@ function renderMoreClassic() {
       id: 'more-login-code',
       value: state.loginCodeDraft || '',
       disabled: isLocalDeviceBanned() ? true : undefined,
+      enterKeyHint: 'go',
+    })
+    code.addEventListener('input', () => {
+      state.loginCodeDraft = code.value
+    })
+    const revealBtn = el('button', {
+      type: 'button',
+      className: 'journal-link login-reveal',
+      text: 'Показать',
+      onClick: () => {
+        const hidden = code.type === 'password'
+        code.type = hidden ? 'text' : 'password'
+        revealBtn.textContent = hidden ? 'Скрыть' : 'Показать'
+      },
     })
     const who = state.loginNeedWho
-      ? el('input', { type: 'text', maxlength: '64', placeholder: 'Фамилия', autocomplete: 'name' })
+      ? el('input', {
+          type: 'text',
+          maxlength: '64',
+          placeholder: 'Фамилия',
+          autocomplete: 'name',
+          value: state.loginWhoDraft || '',
+        })
       : null
+    if (who) {
+      who.addEventListener('input', () => {
+        state.loginWhoDraft = who.value
+      })
+    }
     form.append(
       el('h3', { text: 'Вход' }),
       el('p', {
@@ -4776,7 +4835,13 @@ function renderMoreClassic() {
             ? 'Напиши фамилию — так поймём, чей это код.'
             : 'Код выдаёт админ.',
       }),
-      el('div', { className: 'field' }, [el('label', { text: 'Код доступа' }), code]),
+      el('div', { className: 'field' }, [
+        el('div', { className: 'field-head' }, [
+          el('label', { text: 'Код доступа' }),
+          revealBtn,
+        ]),
+        code,
+      ]),
       who ? el('div', { className: 'field' }, [el('label', { text: 'Фамилия' }), who]) : null,
       el('button', {
         className: 'btn',
@@ -4797,6 +4862,7 @@ function renderMoreClassic() {
         state.highlightLogin = false
         state.loginNeedWho = false
         state.loginCodeDraft = ''
+        state.loginWhoDraft = ''
         const whoName = (s.label || '').trim() || (s.role === 'admin' ? 'Никитос' : 'староста')
         flash(`Вы вошли как ${whoName}`)
       } catch (err) {
@@ -6198,7 +6264,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=126`, { scope: base })
+    .register(`${base}sw.js?v=127`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
