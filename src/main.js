@@ -1,4 +1,4 @@
-import './styles.css'
+﻿import './styles.css'
 import { el } from './lib/security.js'
 import { breakMinutes, DAY_NAMES, DAY_SHORT } from './data/seed.js'
 import {
@@ -73,6 +73,7 @@ import {
   refreshNews,
   addNews,
   deleteNews,
+  moveNews,
 } from './lib/store.js'
 import {
   canGradeGroup,
@@ -6493,15 +6494,42 @@ function relativeTime(iso) {
   if (days < 7) return `${days} дн назад`
   return formatDateRu(String(iso).slice(0, 10))
 }
+/** Дата события: «12 ноября 2026», для сегодняшних — «сегодня в 14:05». */
+function formatNewsDate(iso) {
+  if (!iso) return ''
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return ''
+  const d = new Date(t)
+  const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  const today = new Date()
+  const sameDay =
+    d.getDate() === today.getDate() &&
+    d.getMonth() === today.getMonth() &&
+    d.getFullYear() === today.getFullYear()
+  if (sameDay) return `Сегодня, ${time}`
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
+  if (
+    d.getDate() === yesterday.getDate() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getFullYear() === yesterday.getFullYear()
+  ) {
+    return `Вчера, ${time}`
+  }
+  const date = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+  return d.getFullYear() === today.getFullYear() ? date : `${date} ${d.getFullYear()}`
+}
 
 /**
- * Просмотр события: полноэкранный лист с фото, полным заголовком и текстом.
- * Отдельно от лайтбокса ДЗ — там только картинки, а тут ещё и содержание.
+ * Просмотр события: полноэкранная страница с плавной прокруткой.
+ * Своя «шапка» с фото на весь экран, поверх — градиент и кнопка закрытия,
+ * ниже — карточка с датой, заголовком и полным текстом.
+ * Листание — свайпом влево/вправо и кнопками внизу.
  */
 function openNewsReader(items, startIndex = 0) {
   if (!items?.length) return
   let index = Math.max(0, Math.min(startIndex, items.length - 1))
   closeHwLightbox({ animate: false })
+  document.querySelectorAll('.news-reader').forEach((n) => n.remove())
 
   const overlay = el('div', {
     className: 'news-reader',
@@ -6509,12 +6537,16 @@ function openNewsReader(items, startIndex = 0) {
     'aria-modal': 'true',
     'aria-label': 'Событие',
   })
-  const sheet = el('div', { className: 'news-reader-sheet' })
+  const page = el('div', { className: 'news-reader-page' })
 
+  let closing = false
   const close = () => {
+    if (closing) return
+    closing = true
+    overlay.classList.remove('is-open')
     overlay.classList.add('is-closing')
     document.documentElement.classList.remove('news-reader-open')
-    window.setTimeout(() => overlay.remove(), 220)
+    window.setTimeout(() => overlay.remove(), 260)
   }
 
   const paint = () => {
@@ -6523,99 +6555,192 @@ function openNewsReader(items, startIndex = 0) {
       (a) => /^image\//i.test(a.mime || '') || /\.(jpe?g|png|webp|gif)$/i.test(a.url || ''),
     )
     const canEditNews = canEdit(state.groupId) || getSession()?.role === 'admin'
+    const cover = images[0]
 
-    const gallery = images.length
-      ? el(
-          'div',
-          { className: 'news-reader-gallery' },
-          images.map((a, i) =>
-            el('img', {
-              className: 'news-reader-photo',
-              src: a.url,
-              alt: item.title || '',
-              loading: i === 0 ? 'eager' : 'lazy',
-              decoding: 'async',
-              onClick: () => {
-                hapticTap()
-                openHwLightbox(images.map((x) => x.url), i)
-              },
-            }),
-          ),
-        )
-      : null
-
-    sheet.replaceChildren(
-      el('div', { className: 'news-reader-grab', 'aria-hidden': 'true' }),
-      gallery,
-      el('div', { className: 'news-reader-body' }, [
-        el('div', { className: 'news-reader-tags' }, [
-          item.pinned ? el('span', { className: 'news-reader-pin', text: 'главное' }) : null,
-          items.length > 1
-            ? el('span', { className: 'news-reader-counter', text: `${index + 1} из ${items.length}` })
-            : null,
-        ]),
-        el('h2', { className: 'news-reader-title', text: item.title }),
-        el('p', {
-          className: 'news-reader-meta',
-          text: [item.author, item.createdAt ? relativeTime(item.createdAt) : ''].filter(Boolean).join(' · '),
-        }),
-        item.body
-          ? el('p', { className: 'news-reader-text', text: item.body })
-          : el('p', { className: 'news-reader-text muted', text: 'Без подробностей.' }),
-        el('div', { className: 'news-reader-actions' }, [
-          items.length > 1
-            ? el('button', {
-                type: 'button',
-                className: 'btn secondary',
-                text: '‹ Предыдущее',
-                disabled: index === 0,
-                onClick: () => {
-                  if (index === 0) return
-                  index -= 1
-                  state.newsIndex = index
-                  paint()
-                  sheet.scrollTop = 0
-                },
-              })
-            : null,
-          items.length > 1
-            ? el('button', {
-                type: 'button',
-                className: 'btn secondary',
-                text: 'Следующее ›',
-                disabled: index >= items.length - 1,
-                onClick: () => {
-                  if (index >= items.length - 1) return
-                  index += 1
-                  state.newsIndex = index
-                  paint()
-                  sheet.scrollTop = 0
-                },
-              })
-            : null,
-          canEditNews
-            ? el('button', {
-                type: 'button',
-                className: 'btn btn-ghost news-reader-del',
-                text: 'Удалить',
-                onClick: async () => {
-                  if (!confirm(`Удалить «${item.title}»?`)) return
-                  try {
-                    await deleteNews(item.id)
-                    showToast('Событие удалено')
-                    close()
-                    state.newsIndex = 0
-                    if (!refreshTabPanes(['home'])) render({ force: true })
-                  } catch (err) {
-                    showToast(err.message, true)
-                  }
-                },
-              })
-            : null,
+    const hero = el('div', { className: 'news-reader-hero' }, [
+      cover
+        ? el('img', {
+            className: 'news-reader-cover',
+            src: cover.url,
+            alt: item.title || '',
+            decoding: 'async',
+          })
+        : el('div', { className: 'news-reader-cover news-reader-cover-blank', 'aria-hidden': 'true' }),
+      el('div', { className: 'news-reader-scrim', 'aria-hidden': 'true' }),
+      images.length
+        ? el('button', {
+            type: 'button',
+            className: 'news-reader-zoom',
+            text: 'Увеличить',
+            onClick: () => {
+              hapticTap()
+              openHwLightbox(images.map((x) => x.url), 0)
+            },
+          })
+        : null,
+      el('div', { className: 'news-reader-head' }, [
+        item.pinned ? el('span', { className: 'news-reader-pin', text: 'Главное' }) : null,
+        el('h1', { className: 'news-reader-title', text: item.title }),
+        el('p', { className: 'news-reader-date' }, [
+          el('span', { text: formatNewsDate(item.createdAt) }),
+          item.author ? el('span', { className: 'news-reader-dot-sep', text: '·' }) : null,
+          item.author ? el('span', { text: item.author }) : null,
         ]),
       ]),
+    ])
+
+    // Остальные фото — уже в тексте, чтобы не отбирать внимание у обложки.
+    const extra = images.slice(1)
+
+    const body = el('div', { className: 'news-reader-content' }, [
+      item.body
+        ? el('p', { className: 'news-reader-text', text: item.body })
+        : el('p', { className: 'news-reader-text news-reader-text-muted', text: 'Подробностей пока нет.' }),
+      extra.length
+        ? el(
+            'div',
+            { className: 'news-reader-extra' },
+            extra.map((a, i) =>
+              el('img', {
+                className: 'news-reader-extra-photo',
+                src: a.url,
+                alt: '',
+                loading: 'lazy',
+                decoding: 'async',
+                onClick: () => {
+                  hapticTap()
+                  openHwLightbox(images.map((x) => x.url), i + 1)
+                },
+              }),
+            ),
+          )
+        : null,
+      el('div', { className: 'news-reader-foot' }, [
+        el('span', { className: 'news-reader-foot-brand', text: 'Колледж Чуйкова' }),
+        items.length > 1
+          ? el('span', { className: 'news-reader-foot-count', text: `${index + 1} / ${items.length}` })
+          : null,
+      ]),
+    ])
+
+    const pager = items.length > 1
+      ? el('nav', { className: 'news-reader-pager' }, [
+          el('button', {
+            type: 'button',
+            className: 'news-reader-pager-btn',
+            text: '‹',
+            'aria-label': 'Предыдущее событие',
+            disabled: index === 0,
+            onClick: () => step(-1),
+          }),
+          el(
+            'div',
+            { className: 'news-reader-pager-dots' },
+            items.map((n, i) =>
+              el('button', {
+                type: 'button',
+                className: i === index ? 'news-reader-pager-dot is-on' : 'news-reader-pager-dot',
+                'aria-label': `Событие ${i + 1}`,
+                onClick: () => {
+                  if (i === index) return
+                  index = i
+                  state.newsIndex = i
+                  paint()
+                  page.scrollTop = 0
+                },
+              }),
+            ),
+          ),
+          el('button', {
+            type: 'button',
+            className: 'news-reader-pager-btn',
+            text: '›',
+            'aria-label': 'Следующее событие',
+            disabled: index >= items.length - 1,
+            onClick: () => step(1),
+          }),
+        ])
+      : null
+
+    page.replaceChildren(
+      hero,
+      body,
+      el('div', { className: 'news-reader-toolbar' }, [
+        canEditNews
+          ? el('button', {
+              type: 'button',
+              className: 'news-reader-tool is-up',
+              text: 'Выше',
+              title: 'Показывать раньше',
+              onClick: () => move(index, -1),
+            })
+          : null,
+        canEditNews
+          ? el('button', {
+              type: 'button',
+              className: 'news-reader-tool is-down',
+              text: 'Ниже',
+              title: 'Показывать позже',
+              onClick: () => move(index, 1),
+            })
+          : null,
+        canEditNews
+          ? el('button', {
+              type: 'button',
+              className: 'news-reader-tool is-del',
+              text: 'Удалить',
+              onClick: () => removeItem(),
+            })
+          : null,
+      ]),
+      pager,
     )
   }
+
+  const step = (delta) => {
+    const next = index + delta
+    if (next < 0 || next >= items.length) return
+    hapticTap()
+    index = next
+    state.newsIndex = next
+    paint()
+    page.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const move = async (i, dir) => {
+    const item = items[i]
+    if (!item) return
+    hapticTap()
+    try {
+      await moveNews(item.id, dir, state.groupId)
+      const fresh = getNews(state.groupId)
+      const at = fresh.findIndex((n) => n.id === item.id)
+      index = at < 0 ? 0 : at
+      items = fresh
+      state.newsIndex = index
+      showToast(dir < 0 ? 'Подняли выше' : 'Опустили ниже')
+      paint()
+      if (refreshTabPanes(['home'])) softUpdateNav()
+    } catch (err) {
+      showToast(err.message, true)
+    }
+  }
+
+  const removeItem = async () => {
+    const item = items[index]
+    if (!item) return
+    if (!confirm(`Удалить «${item.title}»?`)) return
+    try {
+      await deleteNews(item.id)
+      showToast('Событие удалено')
+      state.newsIndex = 0
+      close()
+      if (!refreshTabPanes(['home'])) render({ force: true })
+    } catch (err) {
+      showToast(err.message, true)
+    }
+  }
+
   paint()
 
   overlay.append(
@@ -6626,19 +6751,57 @@ function openNewsReader(items, startIndex = 0) {
       'aria-label': 'Закрыть',
       onClick: close,
     }),
-    sheet,
+    page,
   )
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) close()
   })
+
+  // Свайп по странице: горизонтально — соседнее событие, вертикально — прокрутка.
+  let sx = null
+  let sy = null
+  let pulled = 0
+  page.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    sx = e.clientX
+    sy = e.clientY
+    pulled = 0
+  })
+  page.addEventListener('pointermove', (e) => {
+    if (sx == null) return
+    const dx = e.clientX - sx
+    const dy = e.clientY - sy
+    if (Math.abs(dy) > Math.abs(dx)) {
+      pulled = dy
+    }
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+      const dir = dx < 0 ? 1 : -1
+      sx = null
+      step(dir)
+    }
+  })
+  const release = () => {
+    // Тянули страницу вниз при уже прокрученной наверх — закрываем.
+    if (pulled > 110 && page.scrollTop <= 0) close()
+    sx = null
+    sy = null
+    pulled = 0
+  }
+  page.addEventListener('pointerup', release)
+  page.addEventListener('pointercancel', release)
+
   const onKey = (e) => {
     if (e.key === 'Escape') close()
+    else if (e.key === 'ArrowLeft') step(-1)
+    else if (e.key === 'ArrowRight') step(1)
   }
-  document.addEventListener('keydown', onKey, { once: true })
-  overlay.addEventListener('remove', () => document.removeEventListener('keydown', onKey))
+  document.addEventListener('keydown', onKey)
+  const cleanup = () => document.removeEventListener('keydown', onKey)
+  overlay.addEventListener('remove', cleanup)
 
   document.body.append(overlay)
   document.documentElement.classList.add('news-reader-open')
+  document.body.classList.add('news-reader-open')
   if (motionOk()) requestAnimationFrame(() => overlay.classList.add('is-open'))
   else overlay.classList.add('is-open')
 }
@@ -6721,7 +6884,10 @@ function renderHomeHero(group) {
           : el('div', { className: 'home-hero-img home-hero-img-blank', 'aria-hidden': 'true' }),
         el('div', { className: 'home-hero-veil', 'aria-hidden': 'true' }),
         el('div', { className: 'home-hero-caption' }, [
-          item.pinned ? el('span', { className: 'home-hero-pin', text: 'главное' }) : null,
+          el('div', { className: 'home-hero-caption-top' }, [
+            item.pinned ? el('span', { className: 'home-hero-pin', text: 'главное' }) : null,
+            el('span', { className: 'home-hero-date', text: formatNewsDate(item.createdAt) }),
+          ]),
           el('p', { className: 'home-hero-caption-title', text: item.title }),
           item.body ? el('p', { className: 'home-hero-caption-text', text: item.body }) : null,
           el('span', { className: 'home-hero-more', text: 'читать полностью' }),
@@ -6835,47 +7001,102 @@ function renderHomeHero(group) {
     track.addEventListener('pointercancel', finish)
   }
 
-  return el('section', { className: 'home-hero' }, [
-    track,
-    counter,
-    canEditNews
-      ? el('button', {
-          type: 'button',
-          className: 'home-hero-add',
-          text: '+',
-          title: 'Добавить событие',
-          onClick: () => {
-            state.newsCompose = true
-            render({ force: true })
-          },
-        })
-      : null,
-    canEditNews
-      ? el('button', {
-          type: 'button',
-          className: 'home-hero-del',
-          text: '×',
-          title: 'Удалить это событие',
-          onClick: async () => {
-            const live = Math.max(0, Math.min(items.length - 1, Number(state.newsIndex) || 0))
-            const item = items[live]
-            if (!item) return
-            if (!confirm(`Удалить «${item.title}»?`)) return
-            try {
-              await deleteNews(item.id)
-              state.newsIndex = Math.max(0, live - 1)
-              showToast('Событие удалено')
-              if (!refreshTabPanes(['home'])) render({ force: true })
-            } catch (err) {
-              showToast(err.message, true)
-            }
-          },
-        })
-      : null,
-    items.length > 1 ? dots : null,
-  ])
+  const wrapEl = el('section', { className: 'home-hero' }, [track, counter])
+
+  // Автолистание: раз в 20 секунд, пока главная видна и карусель не трогают.
+  if (items.length > 1) {
+    startHeroAutoSlide(wrapEl, {
+      count: items.length,
+      getIndex: () => Number(state.newsIndex) || 0,
+      setIndex: (i) => {
+        state.newsIndex = i
+        setX(i)
+        paintDots(i)
+      },
+    })
+  }
+
+  if (canEditNews) {
+    wrapEl.append(
+      el('button', {
+        type: 'button',
+        className: 'home-hero-add',
+        text: '+',
+        title: 'Добавить событие',
+        onClick: () => {
+          state.newsCompose = true
+          render({ force: true })
+        },
+      }),
+    )
+  }
+
+  if (items.length > 1) wrapEl.append(dots)
+
+  return wrapEl
 }
 
+/** Ссылка на отложенное автолистание: перерисовка главной отменяет старое. */
+let heroAutoTimer = null
+let heroAutoObserver = null
+
+/**
+ * Автолистание карусели: раз в 20 секунд следующее событие.
+ * Останавливается, когда вкладка не видна, когда идёт касание/свайп
+ * и когда поверх открыт просмотр события.
+ */
+function startHeroAutoSlide(sectionEl, { count, getIndex, setIndex }) {
+  const PERIOD = 20000
+  if (heroAutoTimer) {
+    clearInterval(heroAutoTimer)
+    heroAutoTimer = null
+  }
+  if (heroAutoObserver) {
+    heroAutoObserver.disconnect()
+    heroAutoObserver = null
+  }
+  if (!(count > 1)) return
+
+  let held = 0
+  let paused = false
+  const tick = () => {
+    if (paused || held) return
+    if (document.visibilityState !== 'visible') return
+    if (!sectionEl.isConnected) return
+    if (!state.tab || state.tab !== 'home') return
+    if (document.querySelector('.news-reader')) return
+    const i = getIndex() || 0
+    setIndex((i + 1) % count)
+  }
+  heroAutoTimer = setInterval(tick, PERIOD)
+
+  // Пауза на время касания — иначе автолистание выдёргивает слайд из-под пальца.
+  const hold = () => {
+    held += 1
+  }
+  const release = () => {
+    held = Math.max(0, held - 1)
+  }
+  sectionEl.addEventListener('pointerdown', hold, { passive: true })
+  sectionEl.addEventListener('pointerup', release, { passive: true })
+  sectionEl.addEventListener('pointercancel', release, { passive: true })
+  sectionEl.addEventListener('pointerleave', release, { passive: true })
+
+  // Пауза, когда карусель вне экрана: незачем крутить впустую.
+  if (typeof IntersectionObserver === 'function') {
+    heroAutoObserver = new IntersectionObserver(
+      (entries) => {
+        paused = !entries.some((e) => e.isIntersecting)
+      },
+      { threshold: 0.25 },
+    )
+    heroAutoObserver.observe(sectionEl)
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    paused = document.hidden
+  })
+}
 /**
  * Компоузер новости: заголовок, текст, фото, «закрепить».
  * Черновик живёт в `state.newsDraft`, чтобы перерисовка не стирала ввод.
@@ -8339,7 +8560,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=137`, { scope: base })
+    .register(`${base}sw.js?v=138`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
