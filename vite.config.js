@@ -1,14 +1,15 @@
 import { defineConfig } from 'vite'
 import { existsSync, readFileSync } from 'node:fs'
 
-/** Читаем .env.local сами — process.env иначе перебивает прокси прямым supabase.co */
+/** Читаем .env.local сами — process.env иначе перебивает прокси прямым supabase.co.
+ *  Если файла нет (сборка в GitHub Actions) — берём переменную окружения. */
 function fileEnv(key) {
-  for (const file of ['.env.local', '.env']) {
+  for (const file of ['.env.local', '.env', '.env.production']) {
     if (!existsSync(file)) continue
     const m = readFileSync(file, 'utf8').match(new RegExp(`^${key}=(.*)$`, 'm'))
     if (m) return m[1].trim().replace(/^["']|["']$/g, '')
   }
-  return ''
+  return (process.env[key] || '').trim().replace(/^["']|["']$/g, '')
 }
 
 const proxyUrl =
@@ -17,6 +18,7 @@ const directUrl =
   fileEnv('VITE_SUPABASE_DIRECT_URL') ||
   fileEnv('SUPABASE_URL') ||
   'https://azuergqxvqrkvrvqelha.supabase.co'
+const anonKey = fileEnv('VITE_SUPABASE_ANON_KEY')
 
 export default defineConfig({
   base: '/chuikov-rasp/',
@@ -28,5 +30,6 @@ export default defineConfig({
     'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(proxyUrl),
     'import.meta.env.VITE_SUPABASE_PROXY_URL': JSON.stringify(proxyUrl),
     'import.meta.env.VITE_SUPABASE_DIRECT_URL': JSON.stringify(directUrl),
+    'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(anonKey),
   },
 })

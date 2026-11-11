@@ -1,0 +1,60 @@
+name: Deploy to GitHub Pages
+
+# Сборка и публикация сайта через GitHub Actions.
+# Зачем: встроенная (legacy) сборка Pages падала с «Page build failed»
+# и зависала в статусе building — файлы при этом были корректные.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        env:
+          # anon key и адреса Supabase публичны по своей природе —
+          # они и так лежат в собранном бандле на сайте.
+          VITE_SUPABASE_URL: https://rasp-supabase-proxy.tourmaline-purchase.workers.dev
+          VITE_SUPABASE_PROXY_URL: https://rasp-supabase-proxy.tourmaline-purchase.workers.dev
+          VITE_SUPABASE_DIRECT_URL: https://azuergqxvqrkvrvqelha.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_P8IdY1FtCrCroY4U2WSnMA_po0mrcJt
+        run: npx vite build
+
+      - name: Add .nojekyll
+        run: touch dist/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
