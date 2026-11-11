@@ -3762,3 +3762,371 @@ html.ptr-on body {
 .study-panel .panel > p.muted:first-child {
   margin-top: 0;
 }
+
+/* ── Лента «Последние события» на главной ───────────────────── */
+.home-feed {
+  padding: 14px 14px 6px;
+}
+
+.home-feed-more {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.home-feed-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.home-feed-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 0;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.home-feed-row:active .home-feed-title {
+  color: var(--accent);
+}
+
+.home-feed-ico {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.home-feed-ico svg {
+  width: 17px;
+  height: 17px;
+}
+
+.home-feed-row.is-override .home-feed-ico {
+  background: color-mix(in srgb, #d97706 16%, var(--surface));
+  color: #b45309;
+}
+
+html[data-theme='dark'] .home-feed-row.is-override .home-feed-ico {
+  background: color-mix(in srgb, #f59e0b 22%, var(--surface));
+  color: #fbbf24;
+}
+
+.home-feed-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.home-feed-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-feed-text {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.home-feed-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.home-feed-due {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.home-feed-due.is-overdue {
+  background: color-mix(in srgb, #dc2626 14%, var(--surface));
+  color: #b91c1c;
+}
+
+html[data-theme='dark'] .home-feed-due.is-overdue {
+  background: color-mix(in srgb, #ef4444 20%, var(--surface));
+  color: #fca5a5;
+}
+
+/* ── «Моя группа» в профиле ─────────────────────────────────── */
+.groupmates-card {
+  padding: 12px 14px 6px;
+}
+
+.groupmates-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.groupmates-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.groupmates-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupmates-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.groupmates-row:last-child {
+  border-bottom: none;
+}
+
+.groupmates-ava {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.groupmates-row.is-me .groupmates-ava {
+  background: var(--accent);
+  color: #fff;
+}
+
+.groupmates-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.groupmates-name {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupmates-role {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.groupmates-me {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ── Календарь на месяц в «Расписании» ──────────────────────── */
+.week-nav-btn.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cal-card {
+  margin: 0 16px 8px;
+  padding: 12px 12px 10px;
+}
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cal-title {
+  flex: 1 1 auto;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.cal-nav {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cal-dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.cal-dow-cell {
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.cal-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cal-cell.is-empty {
+  cursor: default;
+}
+
+.cal-cell.has-lessons {
+  font-weight: 600;
+}
+
+.cal-cell.is-weekend {
+  color: var(--muted);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.cal-cell.is-today {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.cal-cell.is-selected {
+  background: var(--accent);
+  color: #fff;
+}
+
+.cal-cell.is-selected .cal-dot {
+  background: #fff;
+}
+
+.cal-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.cal-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  text-align: center;
+}
+
+/* ── Контакты одногруппников и форма «Мои контакты» ─────────── */
+.groupmates-contacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 3px;
+}
+
+.groupmates-contact {
+  font-size: 11.5px;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupmates-contact:active {
+  filter: brightness(0.95);
+}
+
+.contacts-visible {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.contacts-visible input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}

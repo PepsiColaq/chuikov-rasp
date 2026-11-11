@@ -39,12 +39,26 @@ export function el(tag, attrs = {}, children = []) {
       node.setAttribute(key, val === true ? '' : String(val))
     }
   }
-  for (const child of [].concat(children)) {
-    if (child == null || child === false) continue
-    node.append(typeof child === 'string' ? text(child) : child)
+  // Вложенные массивы разворачиваем: append([a, b]) вставил бы в DOM
+  // строку «[object HTMLSpanElement],[object Text]».
+  const append = (child) => {
+    if (child == null || child === false) return
+    if (Array.isArray(child)) {
+      for (const c of child) append(c)
+      return
+    }
+    if (typeof child === 'object' && typeof child.nodeType === 'number') {
+      node.append(child)
+      return
+    }
+    // Объект без nodeType — тоже не текст: игнорируем, чтобы не писать «[object Object]».
+    if (typeof child === 'object') return
+    node.append(text(child))
   }
+  append(children)
   return node
 }
+
 
 export async function sha256Hex(plain) {
   const data = new TextEncoder().encode(String(plain))

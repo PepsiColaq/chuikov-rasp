@@ -46,6 +46,41 @@ export async function listStudents(groupId) {
   return Array.isArray(rows) ? rows : []
 }
 
+/**
+ * Одногруппники текущего пользователя (только имя и роль).
+ * Доступно любому вошедшему — в отличие от listStudents, которая требует прав редактора.
+ */
+export async function groupmates() {
+  const session = getSession()
+  const res = await rpc('rasp_groupmates', { p_token: session.token })
+  const me = res?.me || null
+  return {
+    groupId: res?.groupId || res?.groupid || '',
+    groupName: res?.groupName || res?.groupname || '',
+    me: me
+      ? {
+          phone: me.phone || '',
+          email: me.email || '',
+          telegram: me.telegram || '',
+          visible: !!me.visible,
+        }
+      : null,
+    students: Array.isArray(res?.students) ? res.students : [],
+  }
+}
+
+/** Студент сохраняет свои контакты. Пустые строки допустимы — это «не хочу указывать». */
+export async function setMyContacts({ phone = '', email = '', telegram = '', visible = false } = {}) {
+  const session = getSession()
+  return rpc('rasp_set_my_contacts', {
+    p_token: session.token,
+    p_phone: phone,
+    p_email: email,
+    p_telegram: telegram,
+    p_visible: !!visible,
+  })
+}
+
 export async function addStudent(groupId, fullName) {
   const session = getSession()
   return rpc('rasp_add_student', {

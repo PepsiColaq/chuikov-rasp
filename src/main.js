@@ -1,7 +1,7 @@
 import './styles.css'
 import { el } from './lib/security.js'
 import { breakMinutes, DAY_NAMES, DAY_SHORT } from './data/seed.js'
-  import {
+import {
   initStore,
   listGroups,
   getGroup,
@@ -80,6 +80,8 @@ import {
   revokeAdmin,
   newStudentCode,
   listMyMarks,
+  groupmates,
+  setMyContacts,
 } from './lib/journal.js'
 import { renderGradesTab, renderJournalOverlay } from './journal-ui.js'
 import { supabaseConfigured, supabase, storageUrlCandidates, fetchStorageObjectUrl } from './lib/supabase.js'
@@ -95,8 +97,12 @@ const state = {
   tab: 'home',
   /** Подрежим вкладки «Учёба»: 'grades' — журнал и оценки, 'hw' — домашка */
   studyMode: 'grades',
-  /** Подэкран профиля: '' — сам профиль, 'overrides' — замены */
+  /** Подэкран профиля: '' — сам профиль, 'overrides' — замены, 'group' — моя группа */
   moreScreen: '',
+  /** Открыт ли календарь на месяц в «Расписании» */
+  calendarOpen: false,
+  /** Сдвиг месяца в календаре относительно текущего: 0 — этот, -1 — прошлый */
+  calendarMonthOffset: 0,
   groupId: localStorage.getItem(SELECTED_GROUP_KEY) || '',
   day: ((d) => (d === 0 || d === 6 ? 1 : d))(new Date().getDay()),
   weekOffset: 0,
@@ -389,7 +395,33 @@ function shortSubjectLabel(name, max = 36) {
   return `${s.slice(0, Math.max(1, max - 1)).trim()}…`
 }
 
-function renderNowStrip(status) {
+/** «7 мин» / «2 ч 10 мин» — минуты в скобках не читаются, часы понятнее. */
+function humanMins(total) {
+  const m = Math.max(0, Math.round(Number(total) || 0))
+  if (m < 1) return 'меньше минуты'
+  if (m < 60) return `${m} мин`
+  const h = Math.floor(m / 60)
+  const rest = m % 60
+  return rest ? `${h} ч ${rest} мин` : `${h} ч`
+}
+
+/**
+ * Строка «Сейчас / Дальше» над расписанием.
+ * Если впереди построение — показываем его, а не первую пару: именно туда надо идти.
+ */
+function renderNowStrip(status, formation = null) {
+  if (formation?.show && !formation.skipped) {
+    const formMin = hhmmToMinutes(formation.formStart)
+    const until = formMin == null ? null : formMin - nowMinutesOfDay()
+    if (until != null && until > 0) {
+      return el('div', { className: 'now-strip now-strip-next', dataset: { nowStrip: '1' } }, [
+        el('p', {
+          className: 'now-strip-text',
+          text: `Дальше · Построение · через ${humanMins(until)} (${formation.formStart})`,
+        }),
+      ])
+    }
+  }
   if (!status) return null
   if (status.kind === 'done') {
     return el('div', { className: 'now-strip now-strip-done', text: 'На сегодня пары закончились' })
@@ -407,7 +439,7 @@ function renderNowStrip(status) {
     return el('div', { className: 'now-strip now-strip-live', dataset: { nowStrip: '1' } }, [
       el('p', {
         className: 'now-strip-text',
-        text: `Сейчас · ${subject} · до конца ${status.minsLeft} мин`,
+        text: `Сейчас · ${subject} · до конца ${humanMins(status.minsLeft)}`,
       }),
       bar,
     ])
@@ -416,7 +448,7 @@ function renderNowStrip(status) {
     return el('div', { className: 'now-strip now-strip-next', dataset: { nowStrip: '1' } }, [
       el('p', {
         className: 'now-strip-text',
-        text: `Дальше · ${subject} · через ${status.minsUntil} мин`,
+        text: `Дальше · ${subject} · через ${humanMins(status.minsUntil)}`,
       }),
     ])
   }
@@ -707,10 +739,17 @@ function renderTop(group) {
 /** Подзаголовок под названием группы — один уровень на всех вкладках */
 function tabLeadText(tab, group) {
   if (tab === 'home') return 'Главная'
-  if (tab === 'schedule') return 'Пары'
+  if (tab === 'schedule') return 'Расписание'
   if (tab === 'grades') return state.studyMode === 'hw' ? 'Домашнее задание' : 'Журнал и оценки'
-  if (tab === 'more') return state.moreScreen === 'overrides' ? 'Замены' : 'Профиль и настройки'
-  if (tab === 'teachers') return 'Поиск: преподаватель или аудитория'
+  if (tab === 'more')
+    return state.moreScreen === 'overrides'
+      ? 'Замены'
+      : state.moreScreen === 'group'
+        ? 'Моя группа'
+        : state.moreScreen === 'contacts'
+          ? 'Мои контакты'
+          : 'Профиль и настройки'
+  if (tab === 'teachers') return 'Справочник: преподаватель или аудитория'
   if (tab === 'hw') return 'Домашнее задание'
   if (tab === 'overrides') return 'Замены'
   return ''
@@ -762,7 +801,23 @@ function renderDays() {
           }
         },
       }),
+      state.tab === 'schedule'
+        ? el('button', {
+            type: 'button',
+            className: state.calendarOpen ? 'week-nav-btn is-on' : 'week-nav-btn',
+            text: '▦',
+            title: 'Календарь на месяц',
+            onClick: () => {
+              hapticTap()
+              state.calendarOpen = !state.calendarOpen
+              state.calendarMonthOffset = 0
+              if (!refreshTabPanes(['schedule'])) render({ force: true })
+              else softUpdateNav()
+            },
+          })
+        : null,
     ]),
+    state.tab === 'schedule' && state.calendarOpen ? renderMonthCalendar() : null,
     el(
       'div',
       { className: 'days' },
@@ -846,9 +901,11 @@ function lessonMeta(lesson, view) {
   const link = roomLink(view.effectiveRoom)
   if (link) nodes.push(link)
   if (lesson.teacher) nodes.push(textNode(`${link ? ' · ' : ''}${lesson.teacher}`))
-  return el('div', { className: 'lesson-meta' }, [
+  return el(
+    'div',
+    { className: 'lesson-meta' },
     nodes.length ? nodes : [textNode('кабинет не указан')],
-  ])
+  )
 }
 
 function safeStorageUrl(url) {
@@ -2236,7 +2293,12 @@ function renderSchedule() {
     }),
   ])
 
-  const strip = renderNowStrip(nowStatus)
+  // Построение: за 15 мин до первой очной пары (учитывает отмены и дистант).
+  // Полностью выключить: SHOW_FORMATION = false
+  const SHOW_FORMATION = true
+  const formation = SHOW_FORMATION ? resolveFormation(group.id, dateStr, lessons) : null
+
+  const strip = renderNowStrip(nowStatus, formation)
   if (strip) frag.append(strip)
 
   if (!lessons.length) {
@@ -2244,11 +2306,7 @@ function renderSchedule() {
     return frag
   }
 
-  // Построение: за 15 мин до первой очной пары (учитывает отмены и дистант).
-  // Полностью выключить: SHOW_FORMATION = false
-  const SHOW_FORMATION = true
-  if (SHOW_FORMATION) {
-    const formation = resolveFormation(group.id, dateStr, lessons)
+  if (formation) {
     const card = renderFormationCard(group.id, dateStr, formation)
     if (card) {
       frag.append(card)
@@ -2272,6 +2330,120 @@ function renderSchedule() {
     }
   })
   return frag
+}
+
+/**
+ * Календарь на месяц: сетка Пн–Вс, точки на днях с парами.
+ * Клик по дню переключает расписание на его день недели и нужную неделю.
+ */
+function renderMonthCalendar() {
+  const group = getGroup(state.groupId)
+  if (!group) return null
+
+  const now = new Date()
+  const base = new Date(now.getFullYear(), now.getMonth() + Number(state.calendarMonthOffset || 0), 1)
+  const year = base.getFullYear()
+  const month = base.getMonth()
+
+  const todayStr = todayISO()
+  const monthTitle = base.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })
+
+  // Понедельник — первый столбец. getDay(): 0 = Вс.
+  const firstDow = (new Date(year, month, 1).getDay() + 6) % 7
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const hasSat = getLessons(group.id, 6).length > 0
+
+  const cells = []
+  for (let i = 0; i < firstDow; i++) cells.push(el('span', { className: 'cal-cell is-empty' }))
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month, d, 12)
+    const dow = date.getDay() || 7
+    const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    const isToday = iso === todayStr
+    const isWeekend = dow === 7 || (dow === 6 && !hasSat)
+    const lessons = isWeekend ? [] : getLessons(group.id, dow)
+    const thisWeekStart = dateForWeekday(1, state.weekOffset)
+    const selected = iso === dateForWeekday(state.day, state.weekOffset)
+
+    // Сдвиг недели относительно «этой», чтобы клик открыл именно эту дату
+    const diffDays = Math.round(
+      (new Date(`${iso}T12:00:00`) - new Date(`${thisWeekStart}T12:00:00`)) / 86400000,
+    )
+    const weekOffset = Math.round(diffDays / 7)
+
+    cells.push(
+      el(
+        'button',
+        {
+          type: 'button',
+          className: [
+            'cal-cell',
+            isToday ? 'is-today' : '',
+            selected ? 'is-selected' : '',
+            isWeekend ? 'is-weekend' : '',
+            lessons.length ? 'has-lessons' : '',
+          ]
+            .filter(Boolean)
+            .join(' '),
+          onClick: () => {
+            if (isWeekend) return
+            hapticTap()
+            state.weekOffset = weekOffset
+            state.day = dow
+            state.calendarOpen = false
+            if (!refreshTabPanes(['schedule'])) render({ force: true })
+            else softUpdateNav()
+          },
+        },
+        [
+          el('span', { className: 'cal-day', text: String(d) }),
+          lessons.length ? el('span', { className: 'cal-dot' }) : null,
+        ],
+      ),
+    )
+  }
+
+  // Пустые клетки в конце, чтобы сетка не «рвалась»
+  while (cells.length % 7 !== 0) cells.push(el('span', { className: 'cal-cell is-empty' }))
+
+  const shift = (delta) => {
+    state.calendarMonthOffset = Number(state.calendarMonthOffset || 0) + delta
+    if (!refreshTabPanes(['schedule'])) render({ force: true })
+    else softUpdateNav()
+  }
+
+  return el('div', { className: 'card cal-card' }, [
+    el('div', { className: 'cal-head' }, [
+      el('button', {
+        type: 'button',
+        className: 'cal-nav',
+        text: '‹',
+        title: 'Прошлый месяц',
+        onClick: () => shift(-1),
+      }),
+      el('span', { className: 'cal-title', text: monthTitle }),
+      el('button', {
+        type: 'button',
+        className: 'cal-nav',
+        text: '›',
+        title: 'Следующий месяц',
+        onClick: () => shift(1),
+      }),
+    ]),
+    el(
+      'div',
+      { className: 'cal-dow' },
+      ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((n) =>
+        el('span', { className: 'cal-dow-cell', text: n }),
+      ),
+    ),
+    el('div', { className: 'cal-grid' }, cells),
+    el('p', {
+      className: 'cal-hint muted',
+      text: hasSat ? 'Точка — есть пары. Суббота в расписании есть.' : 'Точка — есть пары.',
+    }),
+  ])
 }
 
 function weekdayNumFromIso(iso) {
@@ -5059,6 +5231,10 @@ function moreSvg(kind) {
     phone:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><rect x="8" y="3" width="8" height="18" rx="2"/><path d="M11 18h2"/></svg>',
     swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 8h13M4 8l3-3M4 8l3 3M20 16H7M20 16l-3-3M20 16l-3 3"/></svg>',
+    group:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="9" cy="9" r="3"/><circle cx="16.5" cy="9.5" r="2.4"/><path d="M3.6 19c1-2.8 2.9-4.2 5.4-4.2s4.4 1.4 5.4 4.2"/><path d="M14.6 15.4c1.3-1 2.6-1.4 4.2-1.3 1 .1 1.9.4 2.6 1"/></svg>',
+    contact:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2.5"/><circle cx="10" cy="10.5" r="2"/><path d="M7 16c.7-1.6 1.7-2.4 3-2.4s2.3.8 3 2.4"/><path d="M16 9.5h2M16 12.5h2"/></svg>',
     chevron:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>',
   }
@@ -5187,7 +5363,125 @@ function renderCabinetCard(session) {
 function renderMore() {
   if (state.legalDoc) return renderLegalDoc(state.legalDoc)
   if (state.moreScreen === 'overrides') return renderMoreOverrides()
+  if (state.moreScreen === 'group') return renderMoreGroup()
+  if (state.moreScreen === 'contacts') return renderMoreContacts()
   return MORE_UI_V2 ? renderMoreV2() : renderMoreClassic()
+}
+
+/**
+ * «Мои контакты»: студент сам решает, чем делиться.
+ * Ничего не подтягивается из внешних файлов — пустое поле значит «не указано».
+ */
+function renderMoreContacts() {
+  const back = () =>
+    el('button', {
+      type: 'button',
+      className: 'btn secondary',
+      text: '← Профиль',
+      onClick: () => {
+        state.moreScreen = ''
+        render({ force: true })
+      },
+    })
+
+  const panel = el('div', { className: 'panel' }, [back()])
+  const card = el('div', { className: 'card' })
+  panel.append(card)
+
+  const build = (me) => {
+    const phone = el('input', {
+      type: 'tel',
+      placeholder: '+7 999 123-45-67',
+      value: me?.phone || '',
+      autocomplete: 'tel',
+      maxlength: '32',
+      inputmode: 'tel',
+    })
+    const email = el('input', {
+      type: 'email',
+      placeholder: 'you@example.ru',
+      value: me?.email || '',
+      autocomplete: 'email',
+      maxlength: '96',
+    })
+    const tg = el('input', {
+      type: 'text',
+      placeholder: '@nickname',
+      value: me?.telegram || '',
+      autocomplete: 'off',
+      maxlength: '64',
+    })
+    const visible = el('input', {
+      type: 'checkbox',
+      checked: me?.visible ? true : null,
+      id: 'contacts-visible',
+    })
+
+    const form = el('form', { className: 'contacts-form' }, [
+      el('h3', { text: 'Мои контакты' }),
+      el('p', {
+        className: 'muted',
+        style: 'margin:0 0 10px',
+        text: 'Необязательно. Заполняй, только если хочешь, чтобы одногруппники могли связаться.',
+      }),
+      el('div', { className: 'field' }, [el('label', { text: 'Телефон' }), phone]),
+      el('div', { className: 'field' }, [el('label', { text: 'Почта' }), email]),
+      el('div', { className: 'field' }, [el('label', { text: 'Telegram' }), tg]),
+      el('label', { className: 'contacts-visible', for: 'contacts-visible' }, [
+        visible,
+        el('span', { text: 'Показывать эти контакты моей группе' }),
+      ]),
+      el('button', {
+        type: 'submit',
+        className: 'btn',
+        style: 'margin-top:12px;width:100%',
+        text: 'Сохранить',
+      }),
+    ])
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const btn = form.querySelector('button[type="submit"]')
+      if (btn) btn.disabled = true
+      try {
+        await setMyContacts({
+          phone: phone.value.trim(),
+          email: email.value.trim(),
+          telegram: tg.value.trim(),
+          visible: !!visible.checked,
+        })
+        flash(visible.checked ? 'Сохранено. Группа увидит контакты.' : 'Сохранено. Контакты видишь только ты.')
+        state.moreScreen = 'group'
+        render({ force: true })
+      } catch (err) {
+        flash(err.message, true)
+        if (btn) btn.disabled = false
+      }
+    })
+
+    card.replaceChildren(form)
+  }
+
+  card.append(el('p', { className: 'muted', style: 'margin:0', text: 'Загружаем…' }))
+  groupmates()
+    .then((res) => build(res.me))
+    .catch((err) => {
+      const msg = String(err?.message || '')
+      const notDeployed = /PGRST202|could not find the function|does not exist/i.test(msg)
+      if (notDeployed) {
+        card.replaceChildren(
+          el('p', {
+            className: 'muted',
+            style: 'margin:0',
+            text: 'Контакты ещё не включены на сервере: выполни supabase/contacts_and_groupmates.sql в Supabase → SQL Editor.',
+          }),
+        )
+        return
+      }
+      build(null)
+    })
+
+  return panel
 }
 
 /** Замены внутри профиля — отдельной вкладки больше нет. */
@@ -5205,6 +5499,123 @@ function renderMoreOverrides() {
     }),
     group ? renderOverridesTab(group) : el('div', { className: 'empty', text: 'Сначала выбери группу.' }),
   ])
+}
+
+const ROLE_LABEL = {
+  starosta: 'Староста',
+  teacher: 'Преподаватель',
+  student: 'Студент',
+}
+
+/** «Моя группа»: кто учится рядом. Без кодов и контактов — только имена и роли. */
+function renderMoreGroup() {
+  const panel = el('div', { className: 'panel' }, [
+    el('button', {
+      type: 'button',
+      className: 'btn secondary',
+      text: '← Профиль',
+      onClick: () => {
+        state.moreScreen = ''
+        render({ force: true })
+      },
+    }),
+  ])
+  const body = el('div', { className: 'card groupmates-card' }, [
+    el('p', { className: 'muted', style: 'margin:0', text: 'Загружаем…' }),
+  ])
+  panel.append(body)
+
+  groupmates()
+    .then((res) => {
+      const list = res.students || []
+      if (!list.length) {
+        body.replaceChildren(
+          el('p', {
+            className: 'muted',
+            style: 'margin:0',
+            text: 'В группе пока никого нет. Староста добавляет состав в журнале.',
+          }),
+        )
+        return
+      }
+      body.replaceChildren(
+        el('div', { className: 'groupmates-head' }, [
+          el('h3', { text: res.groupName || 'Моя группа' }),
+          el('span', { className: 'muted', text: `${list.length} чел.` }),
+        ]),
+        el(
+          'div',
+          { className: 'groupmates-list' },
+          list.map((st) => {
+            const name = String(st.fullName || st.fullname || st.surname || '').trim()
+            const role = String(st.role || 'student')
+            const isMe = !!(st.isMe ?? st.isme)
+            const contacts = [
+              st.phone ? { kind: 'tel', text: st.phone, href: `tel:${st.phone.replace(/[^\d+]/g, '')}` } : null,
+              st.email ? { kind: 'mail', text: st.email, href: `mailto:${st.email}` } : null,
+              st.telegram
+                ? {
+                    kind: 'tg',
+                    text: st.telegram,
+                    href: `https://t.me/${String(st.telegram).replace(/^@/, '')}`,
+                  }
+                : null,
+            ].filter(Boolean)
+
+            return el('div', { className: `groupmates-row${isMe ? ' is-me' : ''}` }, [
+              el('span', { className: 'groupmates-ava', text: (name.charAt(0) || '?').toUpperCase() }),
+              el('span', { className: 'groupmates-main' }, [
+                el('span', { className: 'groupmates-name', text: name || 'Без имени' }),
+                role !== 'student'
+                  ? el('span', { className: 'groupmates-role', text: ROLE_LABEL[role] || role })
+                  : null,
+                contacts.length
+                  ? el(
+                      'span',
+                      { className: 'groupmates-contacts' },
+                      contacts.map((c) =>
+                        el('a', {
+                          className: `groupmates-contact is-${c.kind}`,
+                          href: c.href,
+                          rel: c.kind === 'tg' ? 'noopener noreferrer' : null,
+                          target: c.kind === 'tg' ? '_blank' : null,
+                          text: c.text,
+                        }),
+                      ),
+                    )
+                  : null,
+              ]),
+              isMe ? el('span', { className: 'groupmates-me', text: 'это ты' }) : null,
+            ])
+          }),
+        ),
+        el('button', {
+          type: 'button',
+          className: 'btn secondary',
+          style: 'margin:10px 0 4px;width:100%',
+          text: 'Изменить мои контакты',
+          onClick: () => {
+            state.moreScreen = 'contacts'
+            render({ force: true })
+          },
+        }),
+      )
+    })
+    .catch((err) => {
+      const msg = String(err?.message || '')
+      const notDeployed = /PGRST202|could not find the function|does not exist/i.test(msg)
+      body.replaceChildren(
+        el('p', {
+          className: 'muted',
+          style: 'margin:0',
+          text: notDeployed
+            ? 'Список группы ещё не включён на сервере. Нужно один раз выполнить supabase/contacts_and_groupmates.sql в Supabase → SQL Editor.'
+            : msg || 'Не удалось загрузить список группы.',
+        }),
+      )
+    })
+
+  return panel
 }
 
 function renderMoreV2() {
@@ -5289,6 +5700,28 @@ function renderMoreV2() {
       sub: group ? `Сейчас: ${group.name}` : 'Выбрать группу',
       onClick: () => openGroupPicker(),
     }),
+    session
+      ? moreSettingsRow({
+          icon: 'group',
+          title: 'Моя группа',
+          sub: 'Одногруппники и роли',
+          onClick: () => {
+            state.moreScreen = 'group'
+            render({ force: true })
+          },
+        })
+      : null,
+    session && (session.role === 'student' || String(session.codeId || '').startsWith('st_'))
+      ? moreSettingsRow({
+          icon: 'contact',
+          title: 'Мои контакты',
+          sub: 'Телефон, почта, Telegram — по желанию',
+          onClick: () => {
+            state.moreScreen = 'contacts'
+            render({ force: true })
+          },
+        })
+      : null,
     moreSettingsRow({
       icon: 'swap',
       title: 'Замены',
@@ -5863,7 +6296,7 @@ const NAV_ICONS = {
   hw:
     '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8a2 2 0 0 1 2 2v14H6V6a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M9 2.5h6v3H9z" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M9 11h6M9 15h4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
   teachers:
-    '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.25" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M5.5 19.5c1.4-3.2 3.5-4.8 6.5-4.8s5.1 1.6 6.5 4.8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M15 15l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
   overrides:
     '<svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M3.8 18.5c1-2.4 2.5-3.6 5.2-3.6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><circle cx="15.5" cy="8.2" r="2.4" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M12.2 18.5c.9-2.2 2.3-3.3 4.8-3.3 1.2 0 2.2.3 3 .8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
   more:
@@ -5875,7 +6308,7 @@ function renderNav() {
     { id: 'home', label: 'Главная' },
     { id: 'schedule', label: 'Расписание' },
     { id: 'grades', label: 'Учёба' },
-    { id: 'teachers', label: 'Поиск' },
+    { id: 'teachers', label: 'Справочник' },
     { id: 'more', label: 'Профиль' },
   ]
   return el(
@@ -5979,6 +6412,10 @@ function renderHome() {
   const status = getScheduleNowStatus(group.id, today, todayLessons)
   wrap.append(renderHomeNow(status, group))
 
+  // —— Лента: последние события колледжа и группы
+  const feed = renderHomeFeed(group)
+  if (feed) wrap.append(feed)
+
   // —— ДЗ на сегодня
   const hwToday = getHomework(group.id).filter(
     (h) => !isFormationSkipHw(h) && h.dueDate === today,
@@ -6005,7 +6442,7 @@ function renderHome() {
     ['schedule', 'Расписание', 'Все пары на неделю'],
     ['grades', 'Журнал', 'Оценки и посещаемость', 'grades'],
     ['hw', 'Домашка', 'Что задали', 'hw'],
-    ['teachers', 'Поиск', 'Препод или кабинет'],
+    ['teachers', 'Справочник', 'Препод или кабинет'],
   ]
   wrap.append(
     el(
@@ -6029,6 +6466,135 @@ function renderHome() {
 
   return wrap
 }
+
+/** Карточка «идёт сейчас / следующая пара / на сегодня всё». */
+/** Относительное время для ленты: «только что», «2 ч назад», «вчера». */
+function relativeTime(iso) {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return ''
+  const diff = Date.now() - t
+  if (diff < 0) return 'скоро'
+  const min = Math.round(diff / 60000)
+  if (min < 1) return 'только что'
+  if (min < 60) return `${min} мин назад`
+  const hrs = Math.round(min / 60)
+  if (hrs < 24) return `${hrs} ч назад`
+  const days = Math.round(hrs / 24)
+  if (days === 1) return 'вчера'
+  if (days < 7) return `${days} дн назад`
+  return formatDateRu(String(iso).slice(0, 10))
+}
+
+/**
+ * Лента событий группы: свежие ДЗ и замены.
+ * Источник — уже загруженное состояние, поэтому лента появляется мгновенно
+ * и обновляется вместе с ДЗ, без отдельного запроса.
+ */
+function buildHomeFeed(group) {
+  const items = []
+  const today = todayISO()
+
+  for (const h of getHomework(group.id)) {
+    if (isFormationSkipHw(h)) continue
+    if (!h.createdAt) continue
+    items.push({
+      kind: 'hw',
+      at: h.createdAt,
+      title: h.subject || 'Домашнее задание',
+      text: h.text || '',
+      meta: h.authorLabel ? `${h.authorLabel} · ${relativeTime(h.createdAt)}` : relativeTime(h.createdAt),
+      overdue: !!h.dueDate && h.dueDate < today,
+      due: h.dueDate ? `сдать ${formatDateRu(h.dueDate)}` : '',
+    })
+  }
+
+  for (const o of getDb()?.overrides || []) {
+    if (o.groupId !== group.id) continue
+    if (!o.date || o.date < today) continue
+    const lesson = getLessons(group.id).find((l) => l.id === o.lessonId)
+    items.push({
+      kind: 'override',
+      at: `${o.date}T00:00:00`,
+      title: typeLabel(o.type),
+      text: [lesson?.subject, o.newSubject ? `→ ${o.newSubject}` : '', o.newRoom ? `ауд. ${o.newRoom}` : '']
+        .filter(Boolean)
+        .join(' · '),
+      meta: `${formatDateRu(o.date)}${lesson?.start ? ` · ${lesson.start}` : ''}`,
+      due: '',
+    })
+  }
+
+  // Сортировка по свежести ставила бы замену через месяц выше ДЗ, заданного час назад.
+  // Для студента важнее то, что ближе к сегодня, поэтому считаем расстояние в днях.
+  const dayDiff = (iso) => {
+    const t = Date.parse(String(iso).slice(0, 10) + 'T12:00:00')
+    if (!Number.isFinite(t)) return 999
+    return Math.abs(Math.round((t - new Date(`${today}T12:00:00`).getTime()) / 86400000))
+  }
+  items.sort((a, b) => dayDiff(a.at) - dayDiff(b.at) || String(b.at).localeCompare(String(a.at)))
+  return items.slice(0, 6)
+}
+
+/** Лента «Последние события» на главной. Пусто — блока нет. */
+function renderHomeFeed(group) {
+  const items = buildHomeFeed(group)
+  if (!items.length) return null
+
+  return el('section', { className: 'card home-feed' }, [
+    el('div', { className: 'home-card-head' }, [
+      el('h3', { text: 'Последние события' }),
+      el('button', {
+        type: 'button',
+        className: 'home-feed-more',
+        text: 'Всё',
+        onClick: () => gotoTab('grades', { animate: true }),
+      }),
+    ]),
+    el(
+      'div',
+      { className: 'home-feed-list' },
+      items.map((it) =>
+        el(
+          'button',
+          {
+            type: 'button',
+            className: `home-feed-row is-${it.kind}`,
+            onClick: () => {
+              if (it.kind === 'hw') {
+                state.studyMode = 'hw'
+                gotoTab('grades', { animate: true })
+              } else {
+                state.moreScreen = 'overrides'
+                gotoTab('overrides', { animate: true })
+              }
+            },
+          },
+          [
+            el('span', {
+              className: 'home-feed-ico',
+              'aria-hidden': 'true',
+              innerHTML:
+                it.kind === 'hw'
+                  ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M8 4h8a2 2 0 0 1 2 2v14H6V6a2 2 0 0 1 2-2z"/><path d="M9 2.5h6v3H9z"/><path d="M9 11h6M9 15h4"/></svg>'
+                  : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 8h13M4 8l3-3M4 8l3 3M20 16H7M20 16l-3-3M20 16l-3 3"/></svg>',
+            }),
+            el('span', { className: 'home-feed-body' }, [
+              el('span', { className: 'home-feed-title', text: it.title }),
+              it.text ? el('span', { className: 'home-feed-text', text: shortSubjectLabel(it.text, 90) }) : null,
+              el('span', { className: 'home-feed-meta' }, [
+                el('span', { text: it.meta }),
+                it.due
+                  ? el('span', { className: `home-feed-due${it.overdue ? ' is-overdue' : ''}`, text: it.due })
+                  : null,
+              ]),
+            ]),
+          ],
+        ),
+      ),
+    ),
+  ])
+}
+
 
 /** Карточка «идёт сейчас / следующая пара / на сегодня всё». */
 function renderHomeNow(status, group) {
@@ -6066,8 +6632,8 @@ function renderHomeNow(status, group) {
     el('p', {
       className: 'home-now-timer',
       text: isNow
-        ? `осталось ${status.minsLeft} мин`
-        : `через ${status.minsUntil} мин`,
+        ? `осталось ${humanMins(status.minsLeft)}`
+        : `через ${humanMins(status.minsUntil)}`,
     }),
     el('button', {
       type: 'button',
@@ -7299,7 +7865,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=132`, { scope: base })
+    .register(`${base}sw.js?v=133`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
