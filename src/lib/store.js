@@ -147,11 +147,13 @@ function uid(prefix = 'id') {
 
 const ALLOWED_FILE_EXT = new Set([
   'jpg', 'jpeg', 'png', 'webp', 'gif',
+  'mp4', 'webm', 'mov', 'm4v',
   'pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'rtf', 'odt', 'odp',
 ])
 
 const ALLOWED_MIME = new Set([
   'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/jpg',
+  'video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v',
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -171,6 +173,10 @@ const MIME_BY_EXT = {
   png: 'image/png',
   webp: 'image/webp',
   gif: 'image/gif',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  m4v: 'video/x-m4v',
   pdf: 'application/pdf',
   doc: 'application/msword',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -1559,10 +1565,16 @@ export async function uploadHomeworkFiles(groupId, files) {
   const folder = storageFolder(groupId)
   const attachments = []
   for (const file of list) {
-    if (file.size > 20 * 1024 * 1024) throw new Error(`«${file.name}»: максимум 20 МБ`)
+    const isVideo = /^video\//i.test(file.type || '') || /\.(mp4|webm|mov|m4v)$/i.test(file.name || '')
+    const maxBytes = isVideo ? 60 * 1024 * 1024 : 20 * 1024 * 1024
+    if (file.size > maxBytes) {
+      throw new Error(
+        isVideo ? `«${file.name}»: видео максимум 60 МБ` : `«${file.name}»: максимум 20 МБ`,
+      )
+    }
     const rawExt = (file.name.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '')
     if (!ALLOWED_FILE_EXT.has(rawExt)) {
-      throw new Error(`Тип .${rawExt || '?'} не поддерживается. Можно: фото, pdf, doc/docx, ppt/pptx, xls/xlsx, txt`)
+      throw new Error(`Тип .${rawExt || '?'} не поддерживается. Можно: фото, видео, pdf, doc/docx, ppt/pptx, xls/xlsx, txt`)
     }
     let uploadBlob = file
     let mime = (file.type && ALLOWED_MIME.has(file.type) ? file.type : null) || MIME_BY_EXT[rawExt] || 'application/octet-stream'
@@ -2798,6 +2810,39 @@ export async function addNews({
   if (!session?.token) throw new Error('Нужен вход')
   const { data, error } = await supabase.rpc('rasp_add_news', {
     p_token: session.token,
+    p_group_id: groupId || null,
+    p_title: title,
+    p_body: body,
+    p_attachments: attachments.map((a) => ({ url: a.url, name: a.name || 'файл', mime: a.mime || '' })),
+    p_pinned: !!pinned,
+    p_faculties: Array.isArray(faculties) ? faculties : [],
+  })
+  if (error) throw new Error(rpcErrorMessage(error))
+  await refreshNews(groupId)
+  await notifyPeers('news')
+  return data
+}
+
+/**
+ * Правка уже опубликованного события: заголовок, текст, вложения, факультеты,
+ * закрепление и «для всех групп». Обложка — первое фото в списке.
+ */
+export async function updateNews({
+  id,
+  groupId = null,
+  title,
+  body = '',
+  attachments = [],
+  pinned = false,
+  faculties = [],
+}) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token) throw new Error('Нужен вход')
+  if (!id) throw new Error('Не выбрано событие')
+  const { data, error } = await supabase.rpc('rasp_update_news', {
+    p_token: session.token,
+    p_id: id,
     p_group_id: groupId || null,
     p_title: title,
     p_body: body,
