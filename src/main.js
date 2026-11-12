@@ -92,7 +92,7 @@ import {
   staffList,
   staffSet,
 } from './lib/journal.js'
-import { renderGradesTab, renderJournalOverlay } from './journal-ui.js'
+import { renderGradesTab, renderJournalOverlay, personSurname, personRest } from './journal-ui.js'
 import { supabaseConfigured, supabase, storageUrlCandidates, fetchStorageObjectUrl } from './lib/supabase.js'
 import { privacyParagraphs, termsParagraphs } from './lib/legal.js'
 
@@ -5448,6 +5448,25 @@ function renderMoreMyCode() {
   return panel
 }
 /**
+ * Телефон в виде «+7 991 586 15 95».
+ * Плюс и код страны подставляются сами: человек вводит только цифры.
+ */
+function formatPhone(raw) {
+  let digits = String(raw || '').replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits[0] === '8') digits = '7' + digits.slice(1)
+  if (digits[0] !== '7') digits = '7' + digits
+  digits = digits.slice(0, 11)
+  const rest = digits.slice(1)
+  let out = '+7'
+  if (rest.length) out += ` ${rest.slice(0, 3)}`
+  if (rest.length > 3) out += ` ${rest.slice(3, 6)}`
+  if (rest.length > 6) out += ` ${rest.slice(6, 8)}`
+  if (rest.length > 8) out += ` ${rest.slice(8, 10)}`
+  return out
+}
+
+/**
  * «Мои контакты»: студент сам решает, чем делиться.
  * Ничего не подтягивается из внешних файлов — пустое поле значит «не указано».
  */
@@ -5470,11 +5489,24 @@ function renderMoreContacts() {
   const build = (me) => {
     const phone = el('input', {
       type: 'tel',
-      placeholder: '+7 999 123-45-67',
-      value: me?.phone || '',
+      placeholder: '+7 991 586 15 95',
+      value: formatPhone(me?.phone || ''),
       autocomplete: 'tel',
-      maxlength: '32',
+      maxlength: '20',
       inputmode: 'tel',
+    })
+    // Плюс уже стоит: человек вводит 7/8 и цифры, пробелы расставляются сами.
+    phone.addEventListener('input', () => {
+      const atEnd = phone.selectionStart === phone.value.length
+      phone.value = formatPhone(phone.value)
+      if (atEnd) {
+        const len = phone.value.length
+        try {
+          phone.setSelectionRange(len, len)
+        } catch {
+          /* ignore */
+        }
+      }
     })
     const email = el('input', {
       type: 'email',
@@ -5524,7 +5556,7 @@ function renderMoreContacts() {
       if (btn) btn.disabled = true
       try {
         await setMyContacts({
-          phone: phone.value.trim(),
+          phone: formatPhone(phone.value),
           email: email.value.trim(),
           telegram: tg.value.trim(),
           visible: !!visible.checked,
@@ -5610,9 +5642,14 @@ function paintStaffCard(host, students) {
       host.remove()
       return
     }
-    const deputyIds = new Set(data.deputies.map((d) => String(d.studentId)))
-    const hwIds = new Set(data.hwEditors.map((d) => String(d.studentId)))
-    const meDeputyCount = data.deputies.length
+    const deputies = data.deputies || []
+    const hwEditors = data.hwEditors || []
+    const newsEditors = data.newsEditors || []
+    const deputyIds = new Set(deputies.map((d) => String(d.studentId)))
+    const hwIds = new Set(hwEditors.map((d) => String(d.studentId)))
+    const newsIds = new Set(newsEditors.map((d) => String(d.studentId)))
+    const meDeputyCount = deputies.length
+    const canSetNews = ['admin', 'starosta', 'deputy'].includes(data.me)
 
     const apply = async (studentId, kind, on) => {
       try {
@@ -5627,7 +5664,7 @@ function paintStaffCard(host, students) {
     // Компактный список: только те, у кого есть роль, плюс кнопка «назначить».
     const rows = students.filter((st) => {
       const id = String(st.id)
-      if (deputyIds.has(id) || hwIds.has(id)) return true
+      if (deputyIds.has(id) || hwIds.has(id) || newsIds.has(id)) return true
       return st.role === 'starosta' || st.role === 'teacher'
     })
 
@@ -5639,6 +5676,7 @@ function paintStaffCard(host, students) {
       }
       if (deputyIds.has(id)) out.push(el('span', { className: 'staff-chip is-deputy', text: 'Зам' }))
       if (hwIds.has(id)) out.push(el('span', { className: 'staff-chip is-hw', text: 'ДЗ' }))
+      if (newsIds.has(id)) out.push(el('span', { className: 'staff-chip is-news', text: 'Лента' }))
       return out
     }
 
@@ -5710,6 +5748,14 @@ function paintStaffCard(host, students) {
           text: 'Разрешить писать ДЗ',
           onClick: () => give('hw'),
         }),
+        canSetNews
+          ? el('button', {
+              type: 'button',
+              className: 'staff-btn is-news',
+              text: 'Разрешить вести ленту',
+              onClick: () => give('news'),
+            })
+          : null,
       ]),
     ])
 
@@ -5734,6 +5780,16 @@ function paintStaffCard(host, students) {
             className: 'staff-revoke',
             text: 'снять ДЗ',
             onClick: () => apply(id, 'hw', false),
+          }),
+        )
+      }
+      if (newsIds.has(id)) {
+        btns.push(
+          el('button', {
+            type: 'button',
+            className: 'staff-revoke',
+            text: 'снять ленту',
+            onClick: () => apply(id, 'news', false),
           }),
         )
       }
@@ -6850,7 +6906,7 @@ function openNewsReader(items, startIndex = 0) {
     const images = (item.attachments || []).filter(
       (a) => /^image\//i.test(a.mime || '') || /\.(jpe?g|png|webp|gif)$/i.test(a.url || ''),
     )
-    const canEditNews = canEdit(state.groupId) || getSession()?.role === 'admin'
+    const canEditNews = canWriteNews(state.groupId)
     const cover = images[0]
 
     // Фон — та же картинка, размытая и растянутая: рамки вокруг фото не будет.
@@ -6872,11 +6928,11 @@ function openNewsReader(items, startIndex = 0) {
           })
         : el('div', { className: 'news-reader-cover news-reader-cover-blank', 'aria-hidden': 'true' }),
       el('div', { className: 'news-reader-scrim', 'aria-hidden': 'true' }),
-      images.length
+      images.length > 1
         ? el('button', {
             type: 'button',
             className: 'news-reader-zoom',
-            text: 'Увеличить',
+            text: `Все фото · ${images.length}`,
             onClick: () => {
               hapticTap()
               openHwLightbox(images.map((x) => x.url), 0)
@@ -7139,7 +7195,7 @@ function openNewsReader(items, startIndex = 0) {
  */
 function renderHomeHero(group) {
   const items = getNews(group?.id || state.groupId)
-  const canEditNews = canEdit(state.groupId) || getSession()?.role === 'admin'
+  const canEditNews = canWriteNews(state.groupId)
 
   const base = import.meta.env.BASE_URL || '/chuikov-rasp/'
 
@@ -7344,18 +7400,27 @@ function renderHomeHero(group) {
   }
 
   if (canEditNews) {
-    wrapEl.append(
-      el('button', {
-        type: 'button',
-        className: 'home-hero-add',
-        text: '+',
-        title: 'Добавить событие',
-        onClick: () => {
-          state.newsCompose = true
-          render({ force: true })
-        },
-      }),
-    )
+    // Одна кнопка: «+» открывает форму, «−» закрывает. Иконка поворачивается.
+    const composeBtn = el('button', {
+      type: 'button',
+      className: 'home-hero-add',
+      text: state.newsCompose ? '−' : '+',
+      title: state.newsCompose ? 'Закрыть форму' : 'Добавить событие',
+      'aria-expanded': state.newsCompose ? 'true' : 'false',
+      onClick: () => {
+        hapticTap()
+        state.newsCompose = !state.newsCompose
+        if (!state.newsCompose) state.newsDraft = null
+        render({ force: true })
+        if (state.newsCompose) {
+          requestAnimationFrame(() => {
+            document.querySelector('.news-compose')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          })
+        }
+      },
+    })
+    if (state.newsCompose) composeBtn.classList.add('is-open')
+    wrapEl.append(composeBtn)
   }
 
   if (items.length > 1) wrapEl.append(dots)
@@ -7424,16 +7489,53 @@ function startHeroAutoSlide(sectionEl, { count, getIndex, setIndex }) {
     paused = document.hidden
   })
 }
+
+const FACULTY_LABEL = {
+  ПД: 'Правоохранительная деятельность',
+  ПСА: 'Право и организация социального обеспечения',
+  ПСО: 'Право и судебное администрирование',
+  ЭБАС: 'Экономическая безопасность',
+  ИБАС: 'Информационная безопасность',
+  Ю: 'Юриспруденция',
+}
+
+/** Все факультеты, которые вообще есть в колледже — из списка групп. */
+function listFaculties() {
+  const set = new Set()
+  for (const g of listGroups()) {
+    const f = String(g.faculty || '').trim()
+    if (f) set.add(f)
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'ru'))
+}
+
+function canWriteNews(groupId) {
+  const s = getSession()
+  if (!s) return false
+  if (s.role === 'admin') return true
+  return canEdit(groupId)
+}
+
+const MAX_NEWS_PHOTOS = 10
+
 /**
- * Компоузер новости: заголовок, текст, фото, «закрепить».
- * Черновик живёт в `state.newsDraft`, чтобы перерисовка не стирала ввод.
+ * Компоузер события: заголовок, текст, фото, факультеты, закрепление.
+ * Плюс на карточке превращается в минус — это одна и та же кнопка.
  */
 function renderNewsComposer(group) {
-  if (!canEdit(state.groupId) && getSession()?.role !== 'admin') return null
+  if (!canWriteNews(state.groupId)) return null
   if (!state.newsDraft) {
-    state.newsDraft = { title: '', body: '', pinned: false, attachments: [], toAll: false }
+    state.newsDraft = {
+      title: '',
+      body: '',
+      pinned: false,
+      attachments: [],
+      toAll: false,
+      faculties: [],
+    }
   }
   const draft = state.newsDraft
+  if (!Array.isArray(draft.faculties)) draft.faculties = []
   const isAdmin = getSession()?.role === 'admin'
   const card = el('section', { className: 'card news-compose' })
 
@@ -7444,6 +7546,7 @@ function renderNewsComposer(group) {
     placeholder: 'Заголовок — «Экскурсия 20 ноября»',
   })
   title.value = draft.title
+
   const body = el('textarea', {
     className: 'news-compose-grow',
     maxlength: '4000',
@@ -7467,6 +7570,68 @@ function renderNewsComposer(group) {
   pinned.checked = !!draft.pinned
   const toAll = el('input', { type: 'checkbox' })
   toAll.checked = !!draft.toAll
+
+  // —— Факультеты: галочками. Ничего не выбрано = видят все.
+  const faculties = listFaculties()
+  const facChecks = new Map()
+  const facBox = el('div', { className: 'news-fac-list' })
+  const hint = el('p', { className: 'news-fac-hint' })
+
+  const syncHint = () => {
+    const picked = draft.faculties.length
+    hint.textContent = picked
+      ? `Увидят только выбранные: ${draft.faculties.map((f) => FACULTY_LABEL[f] || f).join(', ')}.`
+      : 'Ничего не выбрано — событие увидят все факультеты.'
+    hint.classList.toggle('is-all', !picked)
+  }
+
+  if (!faculties.length) {
+    facBox.append(el('p', { className: 'muted', text: 'Список факультетов пуст.' }))
+    syncHint()
+  } else {
+    facBox.append(
+      el('label', { className: 'news-fac-row is-all' }, [
+        (() => {
+          const cb = el('input', { type: 'checkbox' })
+          cb.checked = !draft.faculties.length
+          cb.addEventListener('change', () => {
+            if (!cb.checked) return
+            draft.faculties = []
+            facChecks.forEach((c) => {
+              c.checked = false
+            })
+            syncHint()
+          })
+          facChecks.set('__all', cb)
+          return cb
+        })(),
+        el('span', { className: 'news-fac-name', text: 'Все факультеты' }),
+      ]),
+    )
+    for (const f of faculties) {
+      const cb = el('input', { type: 'checkbox' })
+      cb.checked = draft.faculties.includes(f)
+      cb.addEventListener('change', () => {
+        if (cb.checked) {
+          if (!draft.faculties.includes(f)) draft.faculties.push(f)
+        } else {
+          draft.faculties = draft.faculties.filter((x) => x !== f)
+        }
+        const all = facChecks.get('__all')
+        if (all) all.checked = !draft.faculties.length
+        syncHint()
+      })
+      facChecks.set(f, cb)
+      facBox.append(
+        el('label', { className: 'news-fac-row' }, [
+          cb,
+          el('span', { className: 'news-fac-name', text: FACULTY_LABEL[f] || f }),
+          el('span', { className: 'news-fac-code', text: f }),
+        ]),
+      )
+    }
+    syncHint()
+  }
 
   const preview = el('div', { className: 'news-compose-preview' })
   const paintPreview = () => {
@@ -7492,6 +7657,11 @@ function renderNewsComposer(group) {
         ]),
       )
     })
+    if (draft.attachments.length >= MAX_NEWS_PHOTOS) {
+      preview.append(
+        el('p', { className: 'muted', text: `Достигнут максимум — ${MAX_NEWS_PHOTOS} фото.` }),
+      )
+    }
   }
   paintPreview()
 
@@ -7524,10 +7694,16 @@ function renderNewsComposer(group) {
 
   file.addEventListener('change', async () => {
     if (!file.files?.length) return
+    const room = MAX_NEWS_PHOTOS - draft.attachments.length
+    if (room <= 0) {
+      showToast(`Максимум ${MAX_NEWS_PHOTOS} фото`, true)
+      file.value = ''
+      return
+    }
     try {
-      const files = [...file.files].slice(0, 4)
+      const picked = [...file.files].slice(0, Math.min(room, 4))
       showToast('Загружаю фото…')
-      const uploaded = await uploadHomeworkFiles(state.groupId, files)
+      const uploaded = await uploadHomeworkFiles(state.groupId, picked)
       draft.attachments.push(...uploaded)
       paintPreview()
     } catch (err) {
@@ -7546,13 +7722,23 @@ function renderNewsComposer(group) {
       state.newsCompose = false
       state.newsDraft = null
       if (!refreshTabPanes(['home'])) render({ force: true })
+      else syncComposeToggle()
     },
   })
 
   const form = el('form', { className: 'news-compose-form' }, [
     el('div', { className: 'field' }, [el('label', { text: 'Заголовок' }), title]),
     el('div', { className: 'field' }, [el('label', { text: 'Текст' }), body]),
-    el('div', { className: 'field' }, [el('label', { text: 'Фото (до 4)' }), file, preview]),
+    el('div', { className: 'field' }, [
+      el('label', { text: `Фото (до ${MAX_NEWS_PHOTOS})` }),
+      file,
+      preview,
+    ]),
+    el('div', { className: 'field' }, [
+      el('label', { text: 'Кто увидит' }),
+      facBox,
+      hint,
+    ]),
     el('label', { className: 'news-compose-check' }, [
       pinned,
       el('span', { text: 'Закрепить сверху' }),
@@ -7582,12 +7768,14 @@ function renderNewsComposer(group) {
         body: body.value.trim(),
         attachments: draft.attachments,
         pinned: pinned.checked,
+        faculties: draft.faculties,
       })
       state.newsCompose = false
       state.newsDraft = null
       state.newsIndex = 0
       showToast('Событие опубликовано')
       if (!refreshTabPanes(['home'])) render({ force: true })
+      else syncComposeToggle()
     } catch (err) {
       submit.disabled = false
       submit.textContent = 'Опубликовать'
@@ -7602,6 +7790,17 @@ function renderNewsComposer(group) {
     form,
   )
   return card
+}
+
+/** Кнопка «+» на карусели превращается в «−», когда компоузер открыт. */
+function syncComposeToggle() {
+  const btn = document.querySelector('.home-hero-add')
+  if (!btn) return
+  const open = !!state.newsCompose
+  btn.textContent = open ? '−' : '+'
+  btn.title = open ? 'Закрыть форму' : 'Добавить событие'
+  btn.classList.toggle('is-open', open)
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false')
 }
 
 /** Карточка «идёт сейчас / следующая пара / на сегодня всё». */
@@ -8892,7 +9091,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=139`, { scope: base })
+    .register(`${base}sw.js?v=140`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда

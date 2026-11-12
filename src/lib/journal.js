@@ -246,10 +246,11 @@ export async function staffList(groupId) {
     deputyLimit: Number(payload.deputyLimit || 4),
     deputies: Array.isArray(payload.deputies) ? payload.deputies : [],
     hwEditors: Array.isArray(payload.hwEditors) ? payload.hwEditors : [],
+    newsEditors: Array.isArray(payload.newsEditors) ? payload.newsEditors : [],
   }
 }
 
-/** Включить/выключить роль. kind: 'deputy' | 'hw'. */
+/** Включить/выключить роль. kind: 'deputy' | 'hw' | 'news'. */
 export async function staffSet(groupId, studentId, kind, on = true) {
   const session = getSession()
   const data = await rpc('rasp_staff_set', {
@@ -265,6 +266,7 @@ export async function staffSet(groupId, studentId, kind, on = true) {
     deputyLimit: Number(payload.deputyLimit || 4),
     deputies: Array.isArray(payload.deputies) ? payload.deputies : [],
     hwEditors: Array.isArray(payload.hwEditors) ? payload.hwEditors : [],
+    newsEditors: Array.isArray(payload.newsEditors) ? payload.newsEditors : [],
   }
 }
 /* ── Роли и дополнительные админы ──────────────────────────────── */

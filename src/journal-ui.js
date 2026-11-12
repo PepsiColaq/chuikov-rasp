@@ -885,14 +885,14 @@ function cleanText(value) {
   return text
 }
 
-function personSurname(student) {
+export function personSurname(student) {
   const surname = cleanText(student?.surname)
   if (surname) return surname
   const full = cleanText(student?.fullName || student?.fullname)
   return full.split(/\s+/)[0] || 'Без фамилии'
 }
 
-function personRest(student) {
+export function personRest(student) {
   const full = cleanText(student?.fullName || student?.fullname)
   const surname = personSurname(student)
   if (!full || full === surname || full === 'Без фамилии') return ''
