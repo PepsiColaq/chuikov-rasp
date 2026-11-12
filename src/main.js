@@ -100,8 +100,20 @@ import {
   curatorCreate,
   curatorRevoke,
 } from './lib/journal.js'
-import { renderGradesTab, renderJournalOverlay, personSurname, personRest } from './journal-ui.js'
-import { supabaseConfigured, supabase, storageUrlCandidates, fetchStorageObjectUrl } from './lib/supabase.js'
+import {
+  renderGradesTab,
+  renderJournalOverlay,
+  personSurname,
+  personRest,
+  markStampLine,
+} from './journal-ui.js'
+import {
+  supabaseConfigured,
+  supabase,
+  storageUrlCandidates,
+  fetchStorageObjectUrl,
+  checkConnectivity,
+} from './lib/supabase.js'
 import { privacyParagraphs, termsParagraphs } from './lib/legal.js'
 
 const SELECTED_GROUP_KEY = 'rasp_selected_group_v3'
@@ -2183,7 +2195,17 @@ function renderFormationMarksOverlay() {
         render({ force: true })
         return
       }
-      const byStudent = new Map((day.marks || []).map((m) => [m.studentId, m]))
+      const byStudent = new Map(
+        (day.marks || []).map((m) => [
+          m.studentId,
+          {
+            attendance: m.attendance || '',
+            comment: m.comment || '',
+            author: m.author || '',
+            updatedAt: m.updatedAt || '',
+          },
+        ]),
+      )
       paintFormationTools(spec, group, students, byStudent, tools, paint)
       paintFormationRows(spec, students, byStudent, list, paint)
     } catch (err) {
@@ -2253,13 +2275,23 @@ function paintFormationRows(spec, students, byStudent, list, reload) {
   }
   const repaint = () => paintFormationRows(spec, students, byStudent, list, reload)
   students.forEach((student, index) => {
-    const mark = byStudent.get(student.id) || { attendance: '', comment: '' }
+    const mark = byStudent.get(student.id) || { attendance: '', comment: '', author: '', updatedAt: '' }
     const save = async (attendance) => {
       const next = attendance === mark.attendance ? '' : attendance
       byStudent.set(student.id, { ...mark, attendance: next })
       repaint()
       try {
-        await setFormationMark(student.id, spec.date, next, mark.comment || '')
+        const saved = await setFormationMark(student.id, spec.date, next, mark.comment || '')
+        const cur = byStudent.get(student.id)
+        if (cur) {
+          if (saved?.author) cur.author = saved.author
+          if (saved?.updatedAt) cur.updatedAt = saved.updatedAt
+          if (saved?.deleted) {
+            cur.author = ''
+            cur.updatedAt = ''
+          }
+        }
+        repaint()
       } catch (err) {
         byStudent.set(student.id, mark)
         flash(err.message, true)
@@ -2295,12 +2327,14 @@ function paintFormationRows(spec, students, byStudent, list, reload) {
         flash(err.message, true)
       }
     })
+    const stampText = markStampLine({ author: mark.author, updatedAt: mark.updatedAt })
     list.append(
       el('article', { className: 'journal-row' }, [
         el('span', { className: 'journal-num', text: String(index + 1) }),
         el('div', { className: 'journal-person' }, [
           el('strong', { text: personSurname(student) }),
           personRest(student) ? el('span', { className: 'muted', text: personRest(student) }) : null,
+          stampText ? el('span', { className: 'journal-stamp', text: stampText }) : null,
         ]),
         el('div', { className: 'journal-controls' }, [seg, comment]),
       ]),
@@ -7453,58 +7487,16 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
     if (e.target === overlay) close()
   })
 
-  // Свайп: горизонтально — соседняя программа, вертикально — прокрутка.
-  let sx = null
-  let sy = null
-  let pulled = 0
-  let axis = null
-  const resetShift = (animate = true) => {
-    page.style.transition = animate ? 'transform 220ms cubic-bezier(0.22,0.61,0.36,1)' : 'none'
-    page.style.transform = ''
-  }
-  page.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return
-    sx = e.clientX
-    sy = e.clientY
-    pulled = 0
-    axis = null
+  attachReaderSwipe({
+    page,
+    count: () => list.length,
+    index: () => index,
+    onStep: (dir) => {
+      index += dir
+      paint()
+    },
+    onClose: close,
   })
-  page.addEventListener('pointermove', (e) => {
-    if (sx == null) return
-    const dx = e.clientX - sx
-    const dy = e.clientY - sy
-    if (!axis) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
-      axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
-    }
-    if (axis === 'y') {
-      pulled = page.scrollTop <= 0 ? dy : 0
-      return
-    }
-    const atEdge = (dx > 0 && index === 0) || (dx < 0 && index === list.length - 1)
-    const shift = atEdge ? dx * 0.28 : dx
-    page.style.transition = 'none'
-    page.style.transform = `translate3d(${shift}px,0,0)`
-    page.style.opacity = String(Math.max(0.55, 1 - Math.abs(shift) / 900))
-    if (Math.abs(dx) > 64 && Math.abs(dx) > Math.abs(dy) * 1.4) {
-      const dir = dx < 0 ? 1 : -1
-      sx = null
-      resetShift()
-      page.style.opacity = ''
-      step(dir)
-    }
-  })
-  const release = () => {
-    if (pulled > 110 && page.scrollTop <= 0) close()
-    sx = null
-    sy = null
-    pulled = 0
-    axis = null
-    resetShift()
-    page.style.opacity = ''
-  }
-  page.addEventListener('pointerup', release)
-  page.addEventListener('pointercancel', release)
 
   const onKey = (e) => {
     if (e.key === 'Escape') close()
@@ -7883,6 +7875,68 @@ function renderMoreSupport() {
     )
   }
 
+  // —— Проверка связи: сразу видно, что мешает — VPN, DPI или сам сайт
+  const netCard = el('div', { className: 'card support-net' })
+  const netBody = el('div', { className: 'support-net-body' })
+  const rerun = el('button', {
+    type: 'button',
+    className: 'btn secondary',
+    text: 'Проверить связь',
+    onClick: () => {
+      void runCheck(true)
+    },
+  })
+  netCard.append(
+    el('h3', { text: 'Связь с сервером' }),
+    el('p', {
+      className: 'muted',
+      style: 'margin:0 0 10px',
+      text: 'Показываем, какие адреса отвечают и за сколько. Если всё «нет» — мешает VPN или блокировка, а не сайт.',
+    }),
+    netBody,
+    el('div', { style: 'margin-top:10px' }, [rerun]),
+  )
+  panel.append(netCard)
+
+  const runCheck = async (manual = false) => {
+    netBody.replaceChildren(el('p', { className: 'muted', style: 'margin:0', text: 'Проверяем…' }))
+    if (manual) rerun.disabled = true
+    try {
+      const rows = await checkConnectivity()
+      netBody.replaceChildren(
+        ...rows.map((r) =>
+          el('div', { className: 'support-net-row' }, [
+            el('span', {
+              className: `support-net-dot${r.ok ? ' is-ok' : ' is-bad'}`,
+              'aria-hidden': 'true',
+            }),
+            el('span', { className: 'support-net-name', text: r.name }),
+            el('span', {
+              className: 'support-net-ms',
+              text: r.ok ? `${r.ms} мс` : 'нет ответа',
+            }),
+          ]),
+        ),
+      )
+      const anyOk = rows.some((r) => r.ok)
+      netBody.append(
+        el('p', {
+          className: `support-net-hint${anyOk ? '' : ' is-bad'}`,
+          text: anyOk
+            ? 'Сайт работает. Если данные всё равно не грузятся — обнови страницу.'
+            : 'Ни один адрес не ответил. Похоже, блокирует VPN или провайдер — попробуй выключить VPN или включить его.',
+        }),
+      )
+    } catch (err) {
+      netBody.replaceChildren(
+        el('p', { className: 'muted', style: 'margin:0', text: err.message || 'Проверка не удалась' }),
+      )
+    } finally {
+      rerun.disabled = false
+    }
+  }
+  void runCheck()
+
   return panel
 }
 
@@ -8056,6 +8110,175 @@ function formatNewsDate(iso) {
   }
   const date = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
   return d.getFullYear() === today.getFullYear() ? date : `${date} ${d.getFullYear()}`
+}
+
+/**
+ * Плавное листание в полноэкранном просмотре.
+ * Страница едет за пальцем один-в-один, у краёв — сопротивление,
+ * на отпускании выезжает и въезжает следующая (без рывка и без «прыжка»).
+ * Вертикально — обычная прокрутка; потянуть вниз с самого верха — закрыть.
+ */
+function attachReaderSwipe({ page, count, index, onStep, onClose }) {
+  const OUT_MS = 190
+  const IN_MS = 250
+  const EASE_OUT = 'cubic-bezier(0.32, 0.72, 0, 1)'
+  const EASE_IN = 'cubic-bezier(0.22, 0.61, 0.36, 1)'
+
+  let sx = null
+  let sy = null
+  let axis = null
+  let dx = 0
+  let moved = 0
+  let busy = false
+  let startAt = 0
+  let width = 0
+  let pulled = 0
+
+  const setT = (transform, opacity, ms, ease) => {
+    page.style.transition = ms ? `transform ${ms}ms ${ease}, opacity ${ms}ms ${ease}` : 'none'
+    page.style.transform = transform
+    page.style.opacity = opacity
+  }
+
+  const settle = () => {
+    setT('translate3d(0,0,0)', '1', IN_MS, EASE_IN)
+    busy = true
+    window.setTimeout(() => {
+      page.style.transition = ''
+      page.style.transform = ''
+      page.style.opacity = ''
+      busy = false
+    }, IN_MS)
+  }
+
+  const slide = (dir) => {
+    const w = width || page.clientWidth || window.innerWidth
+    busy = true
+    // Уезжаем в сторону жеста, затем появляемся с противоположной стороны с новым текстом.
+    setT(`translate3d(${-dir * w * 0.35}px,0,0)`, '0', OUT_MS, EASE_OUT)
+    window.setTimeout(() => {
+      onStep(dir)
+      page.scrollTop = 0
+      setT(`translate3d(${dir * w * 0.6}px,0,0)`, '0', 0, EASE_OUT)
+      // Форсируем reflow, чтобы въезд точно проигрался.
+      void page.offsetWidth
+      setT('translate3d(0,0,0)', '1', IN_MS, EASE_IN)
+      window.setTimeout(() => {
+        page.style.transition = ''
+        page.style.transform = ''
+        page.style.opacity = ''
+        busy = false
+      }, IN_MS)
+    }, OUT_MS)
+  }
+
+  const begin = (e) => {
+    if (busy) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    const t = e.target
+    // Кнопки, ссылки и видео не перехватываем — иначе не нажать.
+    if (t instanceof Element && t.closest('button, a, video, input, .news-reader-pager, .news-reader-toolbar')) return
+    sx = e.clientX
+    sy = e.clientY
+    dx = 0
+    moved = 0
+    pulled = 0
+    axis = null
+    width = page.clientWidth || window.innerWidth
+    startAt = Date.now()
+  }
+
+  const move = (e) => {
+    if (sx == null || busy) return
+    const ddx = e.clientX - sx
+    const ddy = e.clientY - sy
+    if (!axis) {
+      if (Math.abs(ddx) < 6 && Math.abs(ddy) < 6) return
+      axis = Math.abs(ddx) > Math.abs(ddy) * 1.15 ? 'x' : 'y'
+      if (axis === 'x' && page.setPointerCapture) {
+        try {
+          page.setPointerCapture(e.pointerId)
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (axis === 'y') {
+      // Вниз с самого верха — жест «закрыть», страница чуть подаётся.
+      if (ddy > 0 && page.scrollTop <= 0) {
+        pulled = ddy
+        page.style.transition = 'none'
+        page.style.transform = `translate3d(0,${Math.min(ddy * 0.5, 90)}px,0)`
+      } else if (pulled) {
+        pulled = 0
+        page.style.transition = 'none'
+        page.style.transform = ''
+      }
+      return
+    }
+    dx = ddx
+    moved = Math.max(moved, Math.abs(ddx))
+    const max = count() - 1
+    const cur = index()
+    const atEdge = (ddx > 0 && cur <= 0) || (ddx < 0 && cur >= max)
+    const shift = atEdge ? ddx * 0.22 : ddx
+    setT(`translate3d(${shift}px,0,0)`, '', 0, EASE_OUT)
+  }
+
+  const end = (e) => {
+    if (sx == null) return
+    const wasAxis = axis
+    const total = dx
+    const elapsed = Math.max(1, Date.now() - startAt)
+    const velocity = total / elapsed
+    const w = width || page.clientWidth || window.innerWidth
+    sx = null
+    sy = null
+    axis = null
+
+    if (wasAxis === 'y') {
+      const closeIt = pulled > 120
+      pulled = 0
+      if (closeIt) {
+        onClose()
+        return
+      }
+      page.style.transition = 'transform 180ms ' + EASE_IN
+      page.style.transform = ''
+      return
+    }
+
+    const max = count() - 1
+    const cur = index()
+    const far = Math.abs(total) > w * 0.16
+    const fast = Math.abs(velocity) > 0.35 && moved > 24
+    const dir = total < 0 ? 1 : -1
+    const canGo = dir === 1 ? cur < max : cur > 0
+
+    if (canGo && (far || fast)) {
+      slide(dir)
+      return
+    }
+    // Не дотянули — плавно возвращаемся на место.
+    settle()
+  }
+
+  page.addEventListener('pointerdown', begin)
+  page.addEventListener('pointermove', move)
+  page.addEventListener('pointerup', end)
+  page.addEventListener('pointercancel', end)
+  // После свайпа не даём «дожать» тап по фото.
+  page.addEventListener(
+    'click',
+    (e) => {
+      if (moved > 10) {
+        e.stopPropagation()
+        e.preventDefault()
+      }
+      moved = 0
+    },
+    true,
+  )
 }
 
 /**
@@ -8304,61 +8527,17 @@ function openNewsReader(items, startIndex = 0) {
     if (e.target === overlay) close()
   })
 
-  // Свайп по странице: горизонтально — соседнее событие, вертикально — прокрутка.
-  // Страница едет за пальцем, чтобы жест был понятен до отпускания.
-  let sx = null
-  let sy = null
-  let pulled = 0
-  let axis = null
-  const resetShift = (animate = true) => {
-    page.style.transition = animate ? 'transform 220ms cubic-bezier(0.22,0.61,0.36,1)' : 'none'
-    page.style.transform = ''
-  }
-  page.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return
-    sx = e.clientX
-    sy = e.clientY
-    pulled = 0
-    axis = null
+  attachReaderSwipe({
+    page,
+    count: () => items.length,
+    index: () => index,
+    onStep: (dir) => {
+      index += dir
+      state.newsIndex = index
+      paint()
+    },
+    onClose: close,
   })
-  page.addEventListener('pointermove', (e) => {
-    if (sx == null) return
-    const dx = e.clientX - sx
-    const dy = e.clientY - sy
-    if (!axis) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
-      axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
-    }
-    if (axis === 'y') {
-      pulled = page.scrollTop <= 0 ? dy : 0
-      return
-    }
-    // Края: за первым/последним событием сопротивление больше.
-    const atEdge = (dx > 0 && index === 0) || (dx < 0 && index === items.length - 1)
-    const shift = atEdge ? dx * 0.28 : dx
-    page.style.transition = 'none'
-    page.style.transform = `translate3d(${shift}px,0,0)`
-    page.style.opacity = String(Math.max(0.55, 1 - Math.abs(shift) / 900))
-    if (Math.abs(dx) > 64 && Math.abs(dx) > Math.abs(dy) * 1.4) {
-      const dir = dx < 0 ? 1 : -1
-      sx = null
-      resetShift()
-      page.style.opacity = ''
-      step(dir)
-    }
-  })
-  const release = () => {
-    // Тянули страницу вниз при уже прокрученной наверх — закрываем.
-    if (pulled > 110 && page.scrollTop <= 0) close()
-    sx = null
-    sy = null
-    pulled = 0
-    axis = null
-    resetShift()
-    page.style.opacity = ''
-  }
-  page.addEventListener('pointerup', release)
-  page.addEventListener('pointercancel', release)
 
   const onKey = (e) => {
     if (e.key === 'Escape') close()
@@ -10297,7 +10476,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=141`, { scope: base })
+    .register(`${base}sw.js?v=142`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда

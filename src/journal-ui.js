@@ -1,4 +1,4 @@
-﻿import { el } from './lib/security.js'
+import { el } from './lib/security.js'
 import {
   addGrade as addGradeRpc,
   addStudent,
@@ -892,6 +892,44 @@ export function personSurname(student) {
   return full.split(/\s+/)[0] || 'Без фамилии'
 }
 
+/**
+ * Точное время отметки: «сегодня 10:28:41», «вчера 18:02:07»,
+ * иначе «12.11.2026 10:28:41». Секунды нужны, когда спорят «кто когда поставил».
+ */
+export function formatStamp(iso) {
+  if (!iso) return ''
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return ''
+  const d = new Date(t)
+  const pad = (n) => String(n).padStart(2, '0')
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  const now = new Date()
+  const sameDay =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear()
+  if (sameDay) return `сегодня ${time}`
+  const yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+  if (
+    d.getDate() === yest.getDate() &&
+    d.getMonth() === yest.getMonth() &&
+    d.getFullYear() === yest.getFullYear()
+  ) {
+    return `вчера ${time}`
+  }
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${time}`
+}
+
+/** «Кобзева А. · сегодня 10:28:41» — кто и когда поставил отметку. */
+export function markStampLine(source) {
+  const who = cleanText(source?.author)
+  const when = formatStamp(source?.updatedAt || source?.createdAt || source?.at)
+  if (!who && !when) return ''
+  if (!who) return when
+  if (!when) return who
+  return `${who} · ${when}`
+}
+
 export function personRest(student) {
   const full = cleanText(student?.fullName || student?.fullname)
   const surname = personSurname(student)
@@ -932,6 +970,7 @@ function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, re
         comment: next.comment,
       })
       if (saved?.author) byStudent.get(student.id).author = saved.author
+      if (saved?.updatedAt) byStudent.get(student.id).updatedAt = saved.updatedAt
     } catch (err) {
       journalError = err.message || 'Не сохранилось'
       ctx.flash(journalError, true)
@@ -952,7 +991,16 @@ function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, re
         value,
         kind,
       })
-      if (saved?.id) grades.push({ id: saved.id, studentId: student.id, value, kind })
+      if (saved?.id) {
+        grades.push({
+          id: saved.id,
+          studentId: student.id,
+          value,
+          kind,
+          author: saved.author || '',
+          createdAt: saved.createdAt || '',
+        })
+      }
       ctx.state.gradeKind = kind
       repaint()
     } catch (err) {
@@ -997,12 +1045,19 @@ function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, re
   // Чипы оценок: каждая оценка — отдельный чип, тап удаляет (с подтверждением через долгий тап не нужно).
   const gradeStrip = el('div', { className: 'grade-strip' })
   for (const g of grades) {
+    const gStamp = markStampLine({ author: g.author, createdAt: g.createdAt })
     gradeStrip.append(
       el('button', {
         type: 'button',
         className: `grade-pill ${gradeClass(Number(g.value), 'present')}`,
         text: String(g.value),
-        title: `${GRADE_KINDS.find(([k]) => k === g.kind)?.[1] || 'оценка'}${g.comment ? ` · ${g.comment}` : ''} — нажми, чтобы удалить`,
+        title: [
+          GRADE_KINDS.find(([k]) => k === g.kind)?.[1] || 'оценка',
+          g.comment,
+          gStamp,
+        ]
+          .filter(Boolean)
+          .join(' · ') + ' — нажми, чтобы удалить',
         onClick: () => {
           void removeGrade(g)
         },
@@ -1023,12 +1078,14 @@ function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, re
   })
   gradeStrip.append(addBtn)
 
+  const stampText = markStampLine({ author: mark.author, updatedAt: mark.updatedAt })
   const kids = [
     el('span', { className: 'journal-num', text: String(index + 1) }),
     el('div', { className: 'journal-person' }, [
       el('strong', { text: personSurname(student) }),
       extraOn ? el('span', { className: 'journal-tag', text: EXTRA_ATTS.find(([id]) => id === att)?.[1] || '' }) : null,
       personRest(student) ? el('span', { className: 'muted', text: personRest(student) }) : null,
+      stampText ? el('span', { className: 'journal-stamp', text: stampText }) : null,
     ]),
     el('button', {
       type: 'button',
