@@ -1632,6 +1632,9 @@ export async function uploadHomeworkFiles(groupId, files) {
       if (/не найдена|does not exist|PGRST|schema cache|issue_hw_upload/i.test(msg)) {
         throw new Error('На сервере ещё нет защиты загрузок: в Supabase SQL Editor запусти secure_storage_upload.sql')
       }
+      if (/разрешён|allowed|mime/i.test(msg)) {
+        throw new Error('Сервер пока не принимает этот тип: запусти supabase/news_edit_video.sql в SQL Editor')
+      }
       throw new Error(msg)
     }
 
