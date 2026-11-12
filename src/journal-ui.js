@@ -249,7 +249,7 @@ function paintFinal(body, rows) {
     }
     const acc = bySubject.get(key)
     acc.total += 1
-    const att = String(row.attendance || 'present')
+    const att = String(row.attendance || '')
     if (att === 'absent' || att === 'sick') acc.absent += 1
     const n = Number(row.grade)
     if (Number.isFinite(n) && n >= 2 && n <= 5) acc.grades.push(n)
@@ -449,9 +449,10 @@ function paintDiary(ctx, body, rows) {
     if (isOpen) {
       const grid = el('div', { className: 'subject-marks' })
       for (const row of ordered) {
-        const att = String(row.attendance || 'present')
+        const att = String(row.attendance || '')
         const hasGrade = row.grade != null && att === 'present'
-        const label = hasGrade ? String(row.grade) : attendanceShort(att)
+        // Без явки и без оценки — только комментарий, «плюс» не выдумываем.
+        const label = hasGrade ? String(row.grade) : attendanceShort(att) || '·'
         const dateLabel = row.date ? ctx.formatDateRu(String(row.date).slice(0, 10)) : ''
         const kind = hasGrade
           ? String(row.kind || '').trim()
@@ -465,7 +466,9 @@ function paintDiary(ctx, body, rows) {
                   ? 'мероприятие'
                   : att === 'excused'
                     ? 'освобождение'
-                    : 'был(а)'
+                    : att === 'present'
+                      ? 'был(а)'
+                      : 'комментарий'
         grid.append(
           el('div', { className: 'subject-mark-row' }, [
             el('span', {
