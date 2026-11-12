@@ -137,8 +137,23 @@ export async function checkConnectivity() {
   return rows
 }
 
-/** Чтение (GET/HEAD) гоним на оба хоста сразу — первый ответивший и побеждает. */
+/** Чтение (GET/HEAD): пока хост неизвестен — гонка; потом быстрый первый с откатом. */
 async function raceRead(targets, init) {
+  if (preferred || targets.length < 2) {
+    let lastErr = null
+    for (const t of targets) {
+      try {
+        const resp = await oneFetch(t.href, init, FIRST_MS)
+        preferred = t.kind
+        return resp
+      } catch (e) {
+        lastErr = e
+        if (!isNetworkFail(e)) throw e
+      }
+    }
+    throw lastErr || new Error('Нет связи с сервером')
+  }
+  // Хост ещё не выбран (старт приложения или смена сети): оба сразу.
   const attempts = targets.map((t) =>
     oneFetch(t.href, init, FETCH_MS).then((resp) => {
       preferred = t.kind
