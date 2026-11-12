@@ -8665,8 +8665,10 @@ function openNewsReader(items, startIndex = 0) {
     }
     state.newsCompose = true
     state.newsDraft = null
+    // Возвращаемся к ленте главной: раздел допобразования иначе закроет форму.
+    state.moreScreen = ''
     close()
-    if (state.tab === 'home' && !homeProgramKind()) {
+    if (state.tab === 'home') {
       if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
     } else {
       state.tab = 'home'
@@ -10769,7 +10771,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=147`, { scope: base })
+    .register(`${base}sw.js?v=148`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
