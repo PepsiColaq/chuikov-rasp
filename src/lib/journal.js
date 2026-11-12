@@ -132,7 +132,9 @@ export async function upsertMark(row) {
     p_start: row.start,
     p_end: row.end,
     p_subject: row.subject,
-    p_attendance: row.attendance || 'present',
+    // undefined = «не трогать», '' = снять отметку. Раньше '' превращалось
+    // в 'present', и снять плюс было невозможно.
+    p_attendance: row.attendance === undefined ? 'present' : row.attendance || '',
     p_grade: 0,
     p_comment: row.comment || '',
   })
