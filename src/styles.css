@@ -75,7 +75,9 @@ a {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  padding-bottom: 72px;
+  /* Высота нижнего меню + отступ под жест iPhone: 72px не хватало,
+     и низ страницы уезжал под меню. */
+  padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
 }
 
@@ -4011,6 +4013,8 @@ html.ptr-on body {
 
 .news-reader-cover-blank {
   background: linear-gradient(150deg, #23402f, #111a15 72%);
+  /* Без фото обложка схлопывалась в ноль, и плашка уезжала под статус-бар. */
+  min-height: calc(170px + env(safe-area-inset-top, 0px));
 }
 
 /* Плавный переход от фото к подписи, без затемнения самого снимка */
@@ -5715,6 +5719,16 @@ html[data-theme='dark'] .home-feed-due.is-overdue {
   flex-wrap: wrap;
 }
 
+/* Плашка в просмотре программы не должна липнуть к строке статуса:
+   поднимаем её на safe-area + воздух над заголовком. */
+.program-reader .news-reader-head {
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+}
+
+.program-reader .news-reader-title {
+  margin-top: 2px;
+}
+
 .program-reader-kind {
   font-size: 10px;
   letter-spacing: 0.07em;
@@ -6103,4 +6117,79 @@ html[data-theme='dark'] .home-feed-due.is-overdue {
 
 .support-net-hint.is-bad {
   color: #c0392b;
+}
+
+/* ================= Обложка программы ================= */
+/* Кнопка выбора обложки — рядом с превью, чтобы было видно, что это отдельное фото */
+.program-cover-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.program-cover-btn:active {
+  border-color: var(--accent);
+}
+
+.program-cover-hint {
+  margin: -2px 0 2px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Обложка в превью — с рамкой и подписью, остальные фото просто миниатюры */
+.news-compose-thumb.is-cover {
+  width: 92px;
+  height: 92px;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.news-compose-thumb-badge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 3px 4px;
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.news-compose-thumb-cover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 3px 4px;
+  border: 0;
+  background: rgba(16, 24, 40, 0.72);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-align: center;
+  cursor: pointer;
+}
+
+.news-compose-thumb-cover:active {
+  background: var(--accent);
+}
+
+/* Квадратный предпросмотр кадрирования обложки (у аватара — круг) */
+.avatar-crop-canvas.is-square {
+  border-radius: 14px;
 }

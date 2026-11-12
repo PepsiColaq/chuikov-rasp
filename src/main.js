@@ -2801,8 +2801,20 @@ function loadImageFromFile(file) {
   })
 }
 
-/** Редактор: подвинуть/приблизить фото под кружок. Возвращает File или null (отмена). */
-function openAvatarCropEditor(file) {
+/**
+ * Редактор: подвинуть/приблизить фото под рамку.
+ * shape: 'circle' — аватар, 'square' — обложка программы. Возвращает File или null (отмена).
+ */
+function openImageCropEditor(
+  file,
+  {
+    shape = 'circle',
+    size = 512,
+    name = 'avatar.jpg',
+    heading = 'Подгони фото',
+    hint = 'Перетащи пальцем/мышью и подвигай масштаб — в кружке то, что увидят все.',
+  } = {},
+) {
   return new Promise(async (resolve) => {
     let img
     try {
@@ -2814,7 +2826,8 @@ function openAvatarCropEditor(file) {
     }
 
     const VIEW = 260
-    const OUT = 512
+    const OUT = Math.max(200, Math.min(1600, Number(size) || 512))
+    const round = shape !== 'square'
     const nw = img.naturalWidth || img.width
     const nh = img.naturalHeight || img.height
     if (!nw || !nh) {
@@ -2857,6 +2870,19 @@ function openAvatarCropEditor(file) {
       oy = Math.max(-maxY, Math.min(maxY, oy))
     }
 
+    // Рамка предпросмотра: круг для аватара, скруглённый квадрат для обложки.
+    const framePath = (c) => {
+      c.beginPath()
+      if (round) {
+        c.arc(VIEW / 2, VIEW / 2, VIEW / 2 - 1, 0, Math.PI * 2)
+      } else if (typeof c.roundRect === 'function') {
+        c.roundRect(1, 1, VIEW - 2, VIEW - 2, 18)
+      } else {
+        c.rect(1, 1, VIEW - 2, VIEW - 2)
+      }
+      c.closePath()
+    }
+
     const paint = () => {
       if (!ctx) return
       clampOffset()
@@ -2867,16 +2893,13 @@ function openAvatarCropEditor(file) {
       const dy = (VIEW - dh) / 2 + oy
       ctx.clearRect(0, 0, VIEW, VIEW)
       ctx.save()
-      ctx.beginPath()
-      ctx.arc(VIEW / 2, VIEW / 2, VIEW / 2 - 1, 0, Math.PI * 2)
-      ctx.closePath()
+      framePath(ctx)
       ctx.clip()
       ctx.fillStyle = '#111'
       ctx.fillRect(0, 0, VIEW, VIEW)
       ctx.drawImage(img, dx, dy, dw, dh)
       ctx.restore()
-      ctx.beginPath()
-      ctx.arc(VIEW / 2, VIEW / 2, VIEW / 2 - 1, 0, Math.PI * 2)
+      framePath(ctx)
       ctx.strokeStyle = 'rgba(255,255,255,0.55)'
       ctx.lineWidth = 2
       ctx.stroke()
@@ -2946,12 +2969,18 @@ function openAvatarCropEditor(file) {
           const dh = nh * s * scaleOut
           const dx = (OUT - dw) / 2 + ox * scaleOut
           const dy = (OUT - dh) / 2 + oy * scaleOut
+          if (round) {
+            octx.beginPath()
+            octx.arc(OUT / 2, OUT / 2, OUT / 2 - 1, 0, Math.PI * 2)
+            octx.closePath()
+            octx.clip()
+          }
           octx.fillStyle = '#111'
           octx.fillRect(0, 0, OUT, OUT)
           octx.drawImage(img, dx, dy, dw, dh)
           const blob = await new Promise((res) => out.toBlob(res, 'image/jpeg', 0.9))
           if (!blob) throw new Error('Не удалось обрезать')
-          finish(new File([blob], 'avatar.jpg', { type: 'image/jpeg' }))
+          finish(new File([blob], name, { type: 'image/jpeg' }))
         } catch (err) {
           saveBtn.disabled = false
           saveBtn.textContent = 'Сохранить'
@@ -2971,15 +3000,14 @@ function openAvatarCropEditor(file) {
       className: 'avatar-crop-overlay',
       role: 'dialog',
       'aria-modal': 'true',
-      'aria-label': 'Подгонка фото',
+      'aria-label': heading,
     })
+    if (!round) canvas.classList.add('is-square')
+
     overlay.append(
       el('div', { className: 'avatar-crop-sheet' }, [
-        el('h3', { text: 'Подгони фото' }),
-        el('p', {
-          className: 'muted',
-          text: 'Перетащи пальцем/мышью и подвигай масштаб — в кружке то, что увидят все.',
-        }),
+        el('h3', { text: heading }),
+        el('p', { className: 'muted', text: hint }),
         el('div', { className: 'avatar-crop-stage' }, [canvas]),
         el('div', { className: 'avatar-crop-zoom-row' }, [
           el('span', { className: 'muted', text: 'Масштаб' }),
@@ -3012,7 +3040,13 @@ function renderProfileAvatarControls(session) {
     file.value = ''
     if (!f) return
     try {
-      const cropped = await openAvatarCropEditor(f)
+      const cropped = await openImageCropEditor(f, {
+        shape: 'circle',
+        size: 512,
+        name: 'avatar.jpg',
+        heading: 'Подгони фото',
+        hint: 'Перетащи пальцем/мышью и подвигай масштаб — в кружке то, что увидят все.',
+      })
       if (!cropped) return
       await uploadProfileAvatar(cropped)
       flash('Фото обновлено')
@@ -6279,24 +6313,6 @@ function renderMoreV2() {
       },
     }),
     moreSettingsRow({
-      icon: 'book',
-      title: 'Доп. образование',
-      sub: 'Программы и набор групп',
-      onClick: () => {
-        state.moreScreen = 'dpo'
-        render({ force: true })
-      },
-    }),
-    moreSettingsRow({
-      icon: 'club',
-      title: 'Кружки и секции',
-      sub: 'Куда можно записаться',
-      onClick: () => {
-        state.moreScreen = 'clubs'
-        render({ force: true })
-      },
-    }),
-    moreSettingsRow({
       icon: 'help',
       title: 'Техподдержка',
       sub: 'Написать в поддержку',
@@ -7023,11 +7039,11 @@ function renderPrograms(kind) {
     el('button', {
       type: 'button',
       className: 'btn secondary',
-      text: '← Профиль',
+      text: '← Главная',
       onClick: () => {
         state.moreScreen = ''
         state.programDraft = null
-        render({ force: true })
+        gotoTab('home', { animate: true })
       },
     }),
     el('div', { className: 'program-head' }, [
@@ -7174,8 +7190,7 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
     closing = true
     overlay.classList.remove('is-open')
     overlay.classList.add('is-closing')
-    document.documentElement.classList.remove('news-reader-open')
-    document.body.classList.remove('news-reader-open')
+    unlockReaderScroll()
     window.setTimeout(() => overlay.remove(), 260)
   }
 
@@ -7185,7 +7200,9 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
     const cover = images[0]
     const canEditProgram = canManagePrograms()
     const video = programVideoSrc(item.videoUrl)
-    const place = item.subtitle || PROGRAM_KINDS[kind]?.title || ''
+    // Плашка — раздел («Доп. образование»), подпись — отдельной строкой ниже.
+    // Раньше в плашке и в подписи был один и тот же текст.
+    const place = PROGRAM_KINDS[kind]?.title || ''
 
     const hero = el('div', { className: 'news-reader-hero' }, [
       cover
@@ -7507,8 +7524,7 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
   overlay.addEventListener('remove', () => document.removeEventListener('keydown', onKey))
 
   document.body.append(overlay)
-  document.documentElement.classList.add('news-reader-open')
-  document.body.classList.add('news-reader-open')
+  lockReaderScroll()
   if (motionOk()) requestAnimationFrame(() => overlay.classList.add('is-open'))
   else overlay.classList.add('is-open')
 }
@@ -7635,17 +7651,43 @@ function renderProgramEditor(kind) {
     accept: 'image/jpeg,image/png,image/webp,image/gif',
     multiple: true,
   })
+  // Обложка: отдельный выбор с кадрированием в квадрат — как фото профиля.
+  const coverFile = el('input', {
+    type: 'file',
+    accept: 'image/jpeg,image/png,image/webp',
+    style: 'display:none',
+  })
+  const coverBtn = el('button', {
+    type: 'button',
+    className: 'program-cover-btn',
+    text: draft.attachments.length ? 'Сменить обложку' : 'Добавить обложку',
+    onClick: () => coverFile.click(),
+  })
   const preview = el('div', { className: 'news-compose-preview' })
   const paintPreview = () => {
     preview.replaceChildren()
+    coverBtn.textContent = draft.attachments.length ? 'Сменить обложку' : 'Добавить обложку'
     if (!draft.attachments.length) {
       preview.append(el('p', { className: 'muted', text: 'Фото не выбрано' }))
       return
     }
     draft.attachments.forEach((a, i) => {
       preview.append(
-        el('div', { className: 'news-compose-thumb' }, [
+        el('div', { className: `news-compose-thumb${i === 0 ? ' is-cover' : ''}` }, [
           el('img', { src: a.url, alt: a.name || '', loading: 'lazy', decoding: 'async' }),
+          i === 0
+            ? el('span', { className: 'news-compose-thumb-badge', text: 'Обложка' })
+            : el('button', {
+                type: 'button',
+                className: 'news-compose-thumb-cover',
+                text: 'Обложка',
+                title: 'Сделать обложкой',
+                onClick: () => {
+                  const [picked] = draft.attachments.splice(i, 1)
+                  draft.attachments.unshift(picked)
+                  paintPreview()
+                },
+              }),
           el('button', {
             type: 'button',
             className: 'news-compose-thumb-x',
@@ -7661,6 +7703,37 @@ function renderProgramEditor(kind) {
     })
   }
   paintPreview()
+
+  coverFile.addEventListener('change', async () => {
+    const picked = coverFile.files?.[0]
+    coverFile.value = ''
+    if (!picked) return
+    coverBtn.disabled = true
+    coverBtn.textContent = 'Загружаю…'
+    try {
+      const cropped = await openImageCropEditor(picked, {
+        shape: 'square',
+        size: 900,
+        name: 'cover.jpg',
+        heading: 'Обложка программы',
+        hint: 'Двигай и приближай фото — в квадрате то, что увидят в списке.',
+      })
+      if (!cropped) return
+      const [uploaded] = await uploadHomeworkFiles(state.groupId, [cropped])
+      if (!uploaded) throw new Error('Не удалось загрузить фото')
+      // Обложка — всегда первое фото. На лимите заменяем её, а не добавляем 11-ю.
+      const rest = draft.attachments.slice(draft.attachments.length >= MAX_NEWS_PHOTOS ? 1 : 0)
+      draft.attachments = [uploaded, ...rest.filter((a) => a.url !== uploaded.url)]
+      paintPreview()
+    } catch (err) {
+      showToast(err.message, true)
+    } finally {
+      coverBtn.disabled = false
+      paintPreview()
+    }
+  })
+
+
 
   file.addEventListener('change', async () => {
     if (!file.files?.length) return
@@ -7745,9 +7818,18 @@ function renderProgramEditor(kind) {
       detailsBox,
     ]),
     el('div', { className: 'field' }, [
-      el('label', { text: `Фото (до ${MAX_NEWS_PHOTOS})` }),
-      file,
+      el('label', { text: 'Фото' }),
+      el('p', {
+        className: 'muted program-cover-hint',
+        text: 'Первое фото — обложка карточки. Его обрежем ровно под квадрат.',
+      }),
+      coverFile,
+      coverBtn,
       preview,
+    ]),
+    el('div', { className: 'field' }, [
+      el('label', { text: `Добавить ещё фото (до ${MAX_NEWS_PHOTOS})` }),
+      file,
     ]),
     el('div', { className: 'field' }, [el('label', { text: 'Видео' }), videoUrl]),
     el('div', { className: 'field' }, [el('label', { text: 'Контакты' }), contact]),
@@ -8282,6 +8364,22 @@ function attachReaderSwipe({ page, count, index, onStep, onClose }) {
 }
 
 /**
+ * Блокировка прокрутки фона, пока открыт полноэкранный просмотр.
+ * Снимать надо ВСЕГДА с обоих узлов: раньше в одном месте чистили только <html>,
+ * и <body> с overflow:hidden оставался — из-за этого главную иногда нельзя было
+ * доскроллить до конца.
+ */
+function lockReaderScroll() {
+  document.documentElement.classList.add('news-reader-open')
+  document.body.classList.add('news-reader-open')
+}
+
+function unlockReaderScroll() {
+  document.documentElement.classList.remove('news-reader-open')
+  document.body.classList.remove('news-reader-open')
+}
+
+/**
  * Просмотр события: полноэкранная страница с плавной прокруткой.
  * Своя «шапка» с фото на весь экран, поверх — градиент и кнопка закрытия,
  * ниже — карточка с датой, заголовком и полным текстом.
@@ -8307,7 +8405,7 @@ function openNewsReader(items, startIndex = 0) {
     closing = true
     overlay.classList.remove('is-open')
     overlay.classList.add('is-closing')
-    document.documentElement.classList.remove('news-reader-open')
+    unlockReaderScroll()
     window.setTimeout(() => overlay.remove(), 260)
   }
 
@@ -8549,8 +8647,7 @@ function openNewsReader(items, startIndex = 0) {
   overlay.addEventListener('remove', cleanup)
 
   document.body.append(overlay)
-  document.documentElement.classList.add('news-reader-open')
-  document.body.classList.add('news-reader-open')
+  lockReaderScroll()
   if (motionOk()) requestAnimationFrame(() => overlay.classList.add('is-open'))
   else overlay.classList.add('is-open')
 }
@@ -9851,6 +9948,18 @@ function render(opts = {}) {
   const root = document.getElementById('app')
   if (!root) return
 
+  // Страховка: если читалка исчезла из DOM мимо close() (жёсткая перерисовка),
+  // блокировка прокрутки иначе останется навсегда и главная не доскроллится.
+  if (!document.querySelector('.news-reader')) unlockReaderScroll()
+  // Та же история с инлайновой блокировкой от модалок (кадрирование фото).
+  if (
+    document.body.style.overflow === 'hidden' &&
+    !document.querySelector('.news-reader, .avatar-crop-overlay, .hw-lightbox')
+  ) {
+    document.body.style.overflow = ''
+  }
+
+
   const session = getSession()
   const adminHere = session?.role === 'admin'
   const group = state.groupId ? getGroup(state.groupId) : null
@@ -10476,7 +10585,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=143`, { scope: base })
+    .register(`${base}sw.js?v=144`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
