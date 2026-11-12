@@ -1,4 +1,4 @@
-import {
+﻿import {
   hashAccessCode,
   timingSafeEqual,
   sanitizeText,
@@ -2676,13 +2676,24 @@ function mapNewsRow(n) {
     author: n.author || '',
     pinned: !!(n.pinned),
     sortOrder: Number(n.sortOrder ?? n.sortorder ?? 0) || 0,
+    faculties: Array.isArray(n.faculties) ? n.faculties : [],
     createdAt: n.createdAt || n.createdat || '',
   }
 }
 
 /** Новости для группы: общие + её собственные. Закреплённые, затем ручной порядок, затем свежие. */
 export function getNews(groupId = null) {
-  const list = (db.news || []).filter((n) => !n.groupId || n.groupId === groupId)
+  // Событие без факультетов видно всем; с факультетами — только своим.
+  const myFaculty = (() => {
+    const g = getGroup(groupId) || (db.groups || []).find((x) => x.id === groupId)
+    return String(g?.faculty || '').trim()
+  })()
+  const list = (db.news || []).filter((n) => {
+    if (n.groupId && n.groupId !== groupId) return false
+    const f = Array.isArray(n.faculties) ? n.faculties.filter(Boolean) : []
+    if (!f.length) return true
+    return myFaculty ? f.includes(myFaculty) : false
+  })
   return list.slice().sort((a, b) => {
     if (!!b.pinned !== !!a.pinned) return b.pinned ? 1 : -1
     if ((b.sortOrder || 0) !== (a.sortOrder || 0)) return (b.sortOrder || 0) - (a.sortOrder || 0)
@@ -2712,10 +2723,17 @@ export async function refreshNews(groupId = null) {
 }
 
 /** Публикация. p_group_id = null — для всех групп. */
-export async function addNews({ groupId = null, title, body = '', attachments = [], pinned = false }) {
+export async function addNews({
+  groupId = null,
+  title,
+  body = '',
+  attachments = [],
+  pinned = false,
+  faculties = [],
+}) {
   if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
   const session = getSession()
-  if (!session?.token) throw new Error('Нужен вход старосты или админа')
+  if (!session?.token) throw new Error('Нужен вход')
   const { data, error } = await supabase.rpc('rasp_add_news', {
     p_token: session.token,
     p_group_id: groupId || null,
@@ -2723,6 +2741,7 @@ export async function addNews({ groupId = null, title, body = '', attachments = 
     p_body: body,
     p_attachments: attachments.map((a) => ({ url: a.url, name: a.name || 'файл', mime: a.mime || '' })),
     p_pinned: !!pinned,
+    p_faculties: Array.isArray(faculties) ? faculties : [],
   })
   if (error) throw new Error(rpcErrorMessage(error))
   await refreshNews(groupId)
