@@ -1,4 +1,4 @@
-﻿import { supabase, supabaseConfigured, rpcErrorMessage } from './supabase.js'
+import { supabase, supabaseConfigured, rpcErrorMessage } from './supabase.js'
 import { getSession } from './store.js'
 
 function parseJson(data) {
@@ -306,6 +306,41 @@ export async function revokeAdmin(adminId) {
   return rpc('rasp_revoke_admin', {
     p_token: session.token,
     p_admin_id: adminId,
+  })
+}
+
+/* ── Кураторы: назначает админ, куратор ведёт старост и права ────── */
+
+/** [{ id, groupId, groupName, label, code, active, createdAt }] */
+export async function curatorsList() {
+  const session = getSession()
+  const rows = await rpc('rasp_curators_list', { p_token: session.token })
+  return Array.isArray(rows) ? rows : []
+}
+
+/** p_group_id = null → куратор всех групп. */
+export async function curatorCreate(groupId, label, code) {
+  const session = getSession()
+  return rpc('rasp_curator_create', {
+    p_token: session.token,
+    p_group_id: groupId || null,
+    p_label: label,
+    p_code: code,
+  })
+}
+
+export async function curatorRevoke(id) {
+  const session = getSession()
+  return rpc('rasp_curator_revoke', { p_token: session.token, p_id: id })
+}
+
+/** Назначить студента старостой группы (куратор или админ). */
+export async function setStarosta(groupId, studentId) {
+  const session = getSession()
+  return rpc('rasp_set_starosta', {
+    p_token: session.token,
+    p_group_id: groupId,
+    p_student_id: studentId,
   })
 }
 

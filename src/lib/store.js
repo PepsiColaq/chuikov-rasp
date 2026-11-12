@@ -1,4 +1,4 @@
-﻿import {
+import {
   hashAccessCode,
   timingSafeEqual,
   sanitizeText,
@@ -56,6 +56,7 @@ function saveOfflineSnap(data) {
         homework: data.homework,
         overrides: data.overrides,
         news: data.news,
+        programs: data.programs,
       }),
     )
   } catch {
@@ -78,6 +79,7 @@ function loadOfflineSnap() {
       homework: raw.homework || [],
       overrides: raw.overrides || [],
       news: raw.news || [],
+      programs: raw.programs || [],
       audit: [],
       remote: false,
       offline: true,
@@ -263,6 +265,7 @@ function buildLocalSeed() {
     overrides: [],
     homework: [],
     news: [],
+    programs: [],
     audit: [],
     remote: false,
   }
@@ -432,6 +435,7 @@ function baseFromSeedAndSnap() {
     homework: snap?.homework || [],
     overrides: snap?.overrides || [],
     news: snap?.news || [],
+    programs: snap?.programs || [],
     audit: [],
     remote: true,
     offline: false,
@@ -957,6 +961,10 @@ export const ALL_GROUPS_ID = '__all__'
 function sessionCanWriteGroup(session, groupId) {
   if (!session) return false
   if (session.role === 'admin') return true
+  // Куратор: свои группы, либо все, если группа не задана.
+  if (session.role === 'curator') {
+    return !!session.allGroups || !session.groupId || session.groupId === groupId
+  }
   if (session.role === 'starosta' && session.allGroups) return true
   return session.role === 'starosta' && session.groupId === groupId
 }
@@ -1233,6 +1241,46 @@ async function loginAsStudent(clean, who = '') {
   return session
 }
 
+/**
+ * Вход по коду куратора. Коды кураторов выдаёт админ, они живут в отдельной
+ * таблице и не пересекаются с кодами старост и студентов.
+ */
+async function loginAsCurator(clean) {
+  const { data, error } = await withTimeout(
+    supabase.rpc('rasp_curator_login', {
+      p_code: clean,
+      p_visitor_id: getVisitorId(),
+    }),
+    15000,
+    'входа куратора',
+  )
+  if (error) throw new Error(rpcErrorMessage(error))
+  let payload = data
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload)
+    } catch {
+      payload = null
+    }
+  }
+  if (Array.isArray(payload)) payload = payload[0]
+  if (!payload?.token) throw new Error('Неверный код')
+  const session = {
+    role: 'curator',
+    groupId: payload.groupId || payload.groupid || null,
+    allGroups: !(payload.groupId || payload.groupid),
+    canFreeRooms: false,
+    token: payload.token,
+    label: sanitizeText(payload.label || '', 64),
+    roleTitle: 'Куратор',
+    codeId: payload.codeId || payload.codeid || null,
+    avatarUrl: '',
+    expiresAt: Date.now() + SESSION_MS,
+  }
+  writeSession(session)
+  return session
+}
+
 export async function loginWithCode(code, groupIdHint = null, who = '') {
   const clean = sanitizeText(code, LIMITS.accessCode)
   const person = sanitizeText(who, 64)
@@ -1373,6 +1421,20 @@ export async function loginWithCode(code, groupIdHint = null, who = '') {
       }
     }
     if (lastErr && /неверный код/i.test(String(lastErr.message || ''))) {
+      // Код куратора: отдельная таблица, живёт параллельно кодам старост.
+      try {
+        return await loginAsCurator(clean)
+      } catch (curatorErr) {
+        if (looksLikeBanError(curatorErr)) {
+          markLocalDeviceBanned({ reason: String(curatorErr.message || '') })
+          throw curatorErr
+        }
+        const curMsg = String(curatorErr.message || '')
+        // Функции ещё нет — просто идём дальше, к студенту.
+        if (!/неверный код/i.test(curMsg) && !/rasp_curator_login|does not exist|schema cache/i.test(curMsg)) {
+          throw curatorErr
+        }
+      }
       try {
         return await loginAsStudent(clean, person)
       } catch (studentErr) {
@@ -2776,6 +2838,148 @@ export async function moveNews(id, dir, groupId = null) {
   if (error) throw new Error(rpcErrorMessage(error))
   await refreshNews(groupId)
   await notifyPeers('news')
+  return data
+}
+
+/* ── Доп. образование и кружки ──────────────────────────────────── */
+
+function mapProgramRow(p) {
+  return {
+    id: p.id,
+    kind: p.kind || 'dpo',
+    groupId: p.groupId || p.groupid || null,
+    title: p.title || '',
+    subtitle: p.subtitle || '',
+    body: p.body || '',
+    attachments: normalizeAttachments(p.attachments),
+    details: Array.isArray(p.details)
+      ? p.details.filter((d) => d && (d.label || d.value))
+      : [],
+    price: p.price || '',
+    duration: p.duration || '',
+    contact: p.contact || '',
+    videoUrl: p.videoUrl || p.videourl || '',
+    pinned: !!p.pinned,
+    sortOrder: Number(p.sortOrder ?? p.sortorder ?? 0) || 0,
+    author: p.author || '',
+    createdAt: p.createdAt || p.createdat || '',
+  }
+}
+
+function sortPrograms(list) {
+  return list.slice().sort((a, b) => {
+    if (!!b.pinned !== !!a.pinned) return b.pinned ? 1 : -1
+    if ((b.sortOrder || 0) !== (a.sortOrder || 0)) return (b.sortOrder || 0) - (a.sortOrder || 0)
+    return String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+  })
+}
+
+/** Программы раздела: 'dpo' — доп. образование, 'club' — кружки и секции. */
+export function getPrograms(kind, groupId = null) {
+  const list = (db?.programs || []).filter((p) => {
+    if (kind && p.kind !== kind) return false
+    if (p.groupId && groupId && p.groupId !== groupId) return false
+    return true
+  })
+  return sortPrograms(list)
+}
+
+export async function refreshPrograms(kind = null, groupId = null) {
+  if (!supabaseConfigured || !supabase) return getPrograms(kind, groupId)
+  const { data, error } = await supabase.rpc('rasp_programs', {
+    p_kind: kind || null,
+    p_group_id: groupId || null,
+  })
+  if (error) throw new Error(rpcErrorMessage(error))
+  let rows = data
+  if (typeof rows === 'string') {
+    try {
+      rows = JSON.parse(rows)
+    } catch {
+      rows = []
+    }
+  }
+  if (!Array.isArray(rows)) rows = []
+  const fresh = rows.map(mapProgramRow)
+  // Сервер уже отфильтровал по разделу и группе — кэш раздела заменяем целиком.
+  const rest = (db.programs || []).filter((p) => (kind ? p.kind !== kind : false))
+  db.programs = [...rest, ...fresh]
+  saveOfflineSnap(db)
+  return getPrograms(kind, groupId)
+}
+
+export async function saveProgram({
+  id = null,
+  kind,
+  groupId = null,
+  title,
+  subtitle = '',
+  body = '',
+  attachments = [],
+  details = [],
+  price = '',
+  duration = '',
+  contact = '',
+  videoUrl = '',
+  pinned = false,
+} = {}) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token) throw new Error('Нужен вход')
+  const { data, error } = await supabase.rpc('rasp_program_save', {
+    p_token: session.token,
+    p_id: id,
+    p_kind: kind,
+    p_group_id: groupId || null,
+    p_title: title,
+    p_subtitle: subtitle,
+    p_body: body,
+    p_attachments: (attachments || []).map((a) => ({
+      url: a.url,
+      name: a.name || 'файл',
+      mime: a.mime || '',
+    })),
+    p_details: (details || []).filter((d) => (d.label || '').trim() || (d.value || '').trim()),
+    p_price: price,
+    p_duration: duration,
+    p_contact: contact,
+    p_video_url: videoUrl,
+    p_pinned: !!pinned,
+  })
+  if (error) throw new Error(rpcErrorMessage(error))
+  await refreshPrograms(kind, groupId)
+  await notifyPeers('programs')
+  return data
+}
+
+export async function deleteProgram(id) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token) throw new Error('Нужен вход')
+  const { error } = await supabase.rpc('rasp_program_delete', {
+    p_token: session.token,
+    p_id: id,
+  })
+  if (error) throw new Error(rpcErrorMessage(error))
+  db.programs = (db.programs || []).filter((p) => p.id !== id)
+  saveOfflineSnap(db)
+  await notifyPeers('programs')
+}
+
+/** Сдвинуть программу в списке: dir = -1 — выше, 1 — ниже. */
+export async function moveProgram(id, dir, kind = null, groupId = null) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token) throw new Error('Нужен вход')
+  const { data, error } = await supabase.rpc('rasp_program_move', {
+    p_token: session.token,
+    p_id: id,
+    // На сервере порядок обратный (как у новостей): выше = меньше sort_order.
+    p_dir: dir === 1 ? -1 : 1,
+  })
+  if (error) throw new Error(rpcErrorMessage(error))
+  await refreshPrograms(kind, groupId)
+  await notifyPeers('programs')
   return data
 }
 
