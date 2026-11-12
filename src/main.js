@@ -87,6 +87,10 @@ import {
   listMyMarks,
   groupmates,
   setMyContacts,
+  listStudents,
+  setOwnStudentCode,
+  staffList,
+  staffSet,
 } from './lib/journal.js'
 import { renderGradesTab, renderJournalOverlay } from './journal-ui.js'
 import { supabaseConfigured, supabase, storageUrlCandidates, fetchStorageObjectUrl } from './lib/supabase.js'
@@ -162,6 +166,8 @@ const state = {
   journal: null,
   /** current | final */
   gradesMode: 'current',
+  /** Раскрытый предмет в «Текущих оценках» */
+  openSubject: '',
   gradeTip: '',
   /** Сторона «+оценка»: какой вид работы выбран */
   gradeKind: 'answer',
@@ -697,6 +703,8 @@ function shortPersonName(full) {
 
 function sessionPillText(session) {
   if (!session) return 'Войти'
+  // Поле метки приходит с сервера и может быть null — на экран это попадать не должно.
+  session = { ...session, label: String(session.label || '').replace(/^null$/i, '').trim() }
   if (session.role === 'admin') {
     const who = shortPersonName((session.label || '').trim() || 'Никитос')
     return `${who} · выйти`
@@ -5238,6 +5246,7 @@ function moreSvg(kind) {
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="9" cy="9" r="3"/><circle cx="16.5" cy="9.5" r="2.4"/><path d="M3.6 19c1-2.8 2.9-4.2 5.4-4.2s4.4 1.4 5.4 4.2"/><path d="M14.6 15.4c1.3-1 2.6-1.4 4.2-1.3 1 .1 1.9.4 2.6 1"/></svg>',
     contact:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2.5"/><circle cx="10" cy="10.5" r="2"/><path d="M7 16c.7-1.6 1.7-2.4 3-2.4s2.3.8 3 2.4"/><path d="M16 9.5h2M16 12.5h2"/></svg>',
+    key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="8" cy="8" r="3.6"/><path d="M10.7 10.7L20 20M17 17l2-2M14.5 14.5l2-2"/></svg>',
     chevron:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>',
   }
@@ -5294,7 +5303,7 @@ function renderCabinetCard(session) {
   box.append(
     el('div', { className: 'cabinet-head' }, [
       el('h3', { text: 'Личный кабинет' }),
-      el('span', { className: 'muted', text: session.label || '' }),
+      el('span', { className: 'muted', text: String(session.label || '').replace(/^null$/i, '') }),
     ]),
     body,
   )
@@ -5368,9 +5377,76 @@ function renderMore() {
   if (state.moreScreen === 'overrides') return renderMoreOverrides()
   if (state.moreScreen === 'group') return renderMoreGroup()
   if (state.moreScreen === 'contacts') return renderMoreContacts()
+  if (state.moreScreen === 'mycode') return renderMoreMyCode()
   return MORE_UI_V2 ? renderMoreV2() : renderMoreClassic()
 }
 
+/**
+ * Смена собственного кода. Отдельный экран профиля — в журнале эта форма
+ * отвлекала от оценок и ломала ритм заголовков.
+ */
+function renderMoreMyCode() {
+  const panel = el('div', { className: 'panel' }, [
+    el('button', {
+      type: 'button',
+      className: 'btn secondary',
+      text: '← Профиль',
+      onClick: () => {
+        state.moreScreen = ''
+        render({ force: true })
+      },
+    }),
+  ])
+
+  const input = el('input', {
+    type: 'password',
+    maxlength: '64',
+    autocomplete: 'new-password',
+    placeholder: 'Новый код, от 8 символов',
+    value: state.loginCodeDraft || '',
+  })
+  const reveal = el('button', {
+    type: 'button',
+    className: 'journal-link',
+    text: 'Показать',
+    onClick: () => {
+      const hidden = input.type === 'password'
+      input.type = hidden ? 'text' : 'password'
+      reveal.textContent = hidden ? 'Скрыть' : 'Показать'
+    },
+  })
+  const save = el('button', { className: 'btn', type: 'submit', text: 'Сохранить код' })
+
+  const form = el('form', { className: 'field', style: 'gap:10px' }, [
+    el('label', { text: 'Новый код' }),
+    input,
+    el('p', {
+      className: 'muted',
+      style: 'margin:0;font-size:12.5px',
+      text: 'Не короче 8 символов. Запиши куда-нибудь — восстановить нельзя, только выдать новый через старосту.',
+    }),
+    el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, [save, reveal]),
+  ])
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    save.disabled = true
+    save.textContent = 'Сохраняю…'
+    try {
+      await setOwnStudentCode(input.value)
+      showToast('Код обновлён. В следующий раз входи им.')
+      state.loginCodeDraft = ''
+      input.value = ''
+    } catch (err) {
+      showToast(err.message, true)
+    } finally {
+      save.disabled = false
+      save.textContent = 'Сохранить код'
+    }
+  })
+
+  panel.append(el('div', { className: 'card' }, [el('h3', { text: 'Сменить код' }), form]))
+  return panel
+}
 /**
  * «Мои контакты»: студент сам решает, чем делиться.
  * Ничего не подтягивается из внешних файлов — пустое поле значит «не указано».
@@ -5510,6 +5586,204 @@ const ROLE_LABEL = {
   student: 'Студент',
 }
 
+const STAFF_KIND_LABEL = {
+  deputy: 'Зам старосты',
+  hw: 'Может писать ДЗ',
+}
+
+/**
+ * Карточка ролей группы.
+ * Староста видит, кто его замы (до 4) и кто может писать ДЗ (без ограничения).
+ * Зам видит только список, без права назначать замов — сервер это тоже проверяет.
+ */
+function paintStaffCard(host, students) {
+  const groupId = state.groupId
+  if (!groupId) {
+    host.remove()
+    return
+  }
+
+  const build = (data) => {
+    const canEdit = ['admin', 'starosta', 'deputy'].includes(data.me)
+    const canSetDeputy = ['admin', 'starosta'].includes(data.me)
+    if (!canEdit) {
+      host.remove()
+      return
+    }
+    const deputyIds = new Set(data.deputies.map((d) => String(d.studentId)))
+    const hwIds = new Set(data.hwEditors.map((d) => String(d.studentId)))
+    const meDeputyCount = data.deputies.length
+
+    const apply = async (studentId, kind, on) => {
+      try {
+        const next = await staffSet(groupId, studentId, kind, on)
+        build(next)
+        showToast(on ? 'Права выданы' : 'Права сняты')
+      } catch (err) {
+        showToast(err.message, true)
+      }
+    }
+
+    // Компактный список: только те, у кого есть роль, плюс кнопка «назначить».
+    const rows = students.filter((st) => {
+      const id = String(st.id)
+      if (deputyIds.has(id) || hwIds.has(id)) return true
+      return st.role === 'starosta' || st.role === 'teacher'
+    })
+
+    const chips = (st) => {
+      const id = String(st.id)
+      const out = []
+      if (st.role === 'starosta' || st.role === 'teacher') {
+        out.push(el('span', { className: 'staff-chip is-deputy', text: 'Староста' }))
+      }
+      if (deputyIds.has(id)) out.push(el('span', { className: 'staff-chip is-deputy', text: 'Зам' }))
+      if (hwIds.has(id)) out.push(el('span', { className: 'staff-chip is-hw', text: 'ДЗ' }))
+      return out
+    }
+
+    const listBox = el('div', { className: 'staff-list' })
+    if (!rows.length) {
+      listBox.append(
+        el('p', {
+          className: 'muted',
+          style: 'margin:0;font-size:12.5px',
+          text: 'Пока никого не назначили. Можно выдать права ниже.',
+        }),
+      )
+    } else {
+      rows.forEach((st) => {
+        const name = String(st.fullName || st.surname || '').trim() || 'Без имени'
+        listBox.append(
+          el('div', { className: 'staff-row' }, [
+            el('span', { className: 'staff-ava', text: (name.charAt(0) || '?').toUpperCase() }),
+            el('span', { className: 'staff-main' }, [
+              el('span', { className: 'staff-name', text: name }),
+              el('span', { className: 'staff-chips' }, chips(st)),
+            ]),
+          ]),
+        )
+      })
+    }
+
+    // Назначение: выпадающий список свободных студентов + выбор роли.
+    const free = students.filter((st) => {
+      const id = String(st.id)
+      return !deputyIds.has(id) && !hwIds.has(id)
+    })
+    const picker = el(
+      'select',
+      { className: 'staff-select' },
+      [
+        el('option', { value: '', text: 'Выбрать студента…' }),
+        ...free.map((st) => {
+          const name = String(st.fullName || st.surname || '').trim() || 'Без имени'
+          return el('option', { value: String(st.id), text: name })
+        }),
+      ],
+    )
+
+    const give = (kind) => {
+      const id = picker.value
+      if (!id) {
+        showToast('Сначала выбери студента', true)
+        return
+      }
+      void apply(id, kind, true)
+    }
+
+    const assignBox = el('div', { className: 'staff-assign' }, [
+      picker,
+      el('div', { className: 'staff-assign-actions' }, [
+        canSetDeputy
+          ? el('button', {
+              type: 'button',
+              className: 'staff-btn',
+              text: meDeputyCount >= 4 ? 'Замов уже 4' : 'Сделать замом',
+              disabled: meDeputyCount >= 4,
+              onClick: () => give('deputy'),
+            })
+          : null,
+        el('button', {
+          type: 'button',
+          className: 'staff-btn is-hw',
+          text: 'Разрешить писать ДЗ',
+          onClick: () => give('hw'),
+        }),
+      ]),
+    ])
+
+    // Снятие прав — маленькие крестики у чипов.
+    const revoke = (st) => {
+      const id = String(st.id)
+      const btns = []
+      if (deputyIds.has(id) && canSetDeputy) {
+        btns.push(
+          el('button', {
+            type: 'button',
+            className: 'staff-revoke',
+            text: 'снять зама',
+            onClick: () => apply(id, 'deputy', false),
+          }),
+        )
+      }
+      if (hwIds.has(id)) {
+        btns.push(
+          el('button', {
+            type: 'button',
+            className: 'staff-revoke',
+            text: 'снять ДЗ',
+            onClick: () => apply(id, 'hw', false),
+          }),
+        )
+      }
+      return btns.length ? el('span', { className: 'staff-revoke-wrap' }, btns) : null
+    }
+
+    host.replaceChildren(
+      el('div', { className: 'staff-head' }, [
+        el('h3', { text: 'Роли в группе' }),
+        el('span', { className: 'muted', text: `${meDeputyCount} / 4 замов` }),
+      ]),
+      el('p', {
+        className: 'muted staff-hint',
+        text: canSetDeputy
+          ? 'Зам старосты ведёт журнал и построение. Писать ДЗ можно разрешить любому — без ограничения.'
+          : 'Ты зам старосты: ведёшь журнал и построение, можешь разрешать писать ДЗ.',
+      }),
+      listBox,
+      rows.map((st) => revoke(st)).filter(Boolean).length
+        ? el('div', { className: 'staff-revoke-list' }, rows.map((st) => {
+            const name = String(st.fullName || st.surname || '').trim() || 'Без имени'
+            const rev = revoke(st)
+            return rev
+              ? el('div', { className: 'staff-revoke-row' }, [
+                  el('span', { className: 'staff-revoke-name', text: name }),
+                  rev,
+                ])
+              : null
+          }))
+        : null,
+      assignBox,
+    )
+  }
+
+  staffList(groupId)
+    .then(build)
+    .catch((err) => {
+      const msg = String(err?.message || '')
+      const notDeployed = /PGRST202|could not find the function|does not exist/i.test(msg)
+      host.replaceChildren(
+        el('p', {
+          className: 'muted',
+          style: 'margin:0',
+          text: notDeployed
+            ? 'Роли ещё не включены на сервере: выполни supabase/roles_delegation.sql в Supabase → SQL Editor.'
+            : msg || 'Не удалось загрузить роли.',
+        }),
+      )
+    })
+}
 /** «Моя группа»: кто учится рядом. Без кодов и контактов — только имена и роли. */
 function renderMoreGroup() {
   const panel = el('div', { className: 'panel' }, [
@@ -5528,9 +5802,16 @@ function renderMoreGroup() {
   ])
   panel.append(body)
 
+  // Роли: сразу видно, кто староста, кто зам, кто может писать ДЗ.
+  const staffHost = el('div', { className: 'card staff-card' }, [
+    el('p', { className: 'muted', style: 'margin:0', text: 'Загружаем роли…' }),
+  ])
+  panel.append(staffHost)
+
   groupmates(state.groupId)
     .then((res) => {
       const list = res.students || []
+      paintStaffCard(staffHost, list)
       if (!list.length) {
         body.replaceChildren(
           el('p', {
@@ -5736,6 +6017,21 @@ function renderMoreV2() {
     }),
   ]
 
+  // Смена своего кода — раньше жила в «Учёбе» и мешала журналу.
+  if (session && (session.role === 'student' || String(session.codeId || '').startsWith('st_'))) {
+    settingsKids.push(
+      moreSettingsRow({
+        icon: 'key',
+        title: 'Сменить код',
+        sub: 'Свой код входа',
+        onClick: () => {
+          state.moreScreen = 'mycode'
+          render({ force: true })
+        },
+      }),
+    )
+  }
+
   if (!isStandaloneApp()) {
     settingsKids.push(
       moreSettingsRow({
@@ -5773,7 +6069,7 @@ function renderMoreV2() {
       type: 'password',
       autocomplete: 'current-password',
       maxlength: '64',
-      placeholder: 'Код старосты или админа',
+      placeholder: 'Введите код авторизации',
       required: true,
       id: 'more-login-code',
       value: state.loginCodeDraft || '',
@@ -6013,7 +6309,7 @@ function renderMoreClassic() {
       type: 'password',
       autocomplete: 'current-password',
       maxlength: '64',
-      placeholder: 'Код старосты или админа',
+      placeholder: 'Введите код авторизации',
       required: true,
       id: 'more-login-code',
       value: state.loginCodeDraft || '',
@@ -6557,7 +6853,16 @@ function openNewsReader(items, startIndex = 0) {
     const canEditNews = canEdit(state.groupId) || getSession()?.role === 'admin'
     const cover = images[0]
 
+    // Фон — та же картинка, размытая и растянутая: рамки вокруг фото не будет.
+    // Сам снимок показываем целиком (contain), ничего не обрезаем.
     const hero = el('div', { className: 'news-reader-hero' }, [
+      cover
+        ? el('div', {
+            className: 'news-reader-blur',
+            'aria-hidden': 'true',
+            style: `background-image:url("${cover.url}")`,
+          })
+        : null,
       cover
         ? el('img', {
             className: 'news-reader-cover',
@@ -6615,12 +6920,11 @@ function openNewsReader(items, startIndex = 0) {
             ),
           )
         : null,
-      el('div', { className: 'news-reader-foot' }, [
-        el('span', { className: 'news-reader-foot-brand', text: 'Колледж Чуйкова' }),
-        items.length > 1
-          ? el('span', { className: 'news-reader-foot-count', text: `${index + 1} / ${items.length}` })
-          : null,
-      ]),
+      items.length > 1
+        ? el('div', { className: 'news-reader-foot' }, [
+            el('span', { className: 'news-reader-foot-count', text: `${index + 1} из ${items.length}` }),
+          ])
+        : null,
     ])
 
     const pager = items.length > 1
@@ -6758,25 +7062,45 @@ function openNewsReader(items, startIndex = 0) {
   })
 
   // Свайп по странице: горизонтально — соседнее событие, вертикально — прокрутка.
+  // Страница едет за пальцем, чтобы жест был понятен до отпускания.
   let sx = null
   let sy = null
   let pulled = 0
+  let axis = null
+  const resetShift = (animate = true) => {
+    page.style.transition = animate ? 'transform 220ms cubic-bezier(0.22,0.61,0.36,1)' : 'none'
+    page.style.transform = ''
+  }
   page.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     sx = e.clientX
     sy = e.clientY
     pulled = 0
+    axis = null
   })
   page.addEventListener('pointermove', (e) => {
     if (sx == null) return
     const dx = e.clientX - sx
     const dy = e.clientY - sy
-    if (Math.abs(dy) > Math.abs(dx)) {
-      pulled = dy
+    if (!axis) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+      axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
     }
-    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+    if (axis === 'y') {
+      pulled = page.scrollTop <= 0 ? dy : 0
+      return
+    }
+    // Края: за первым/последним событием сопротивление больше.
+    const atEdge = (dx > 0 && index === 0) || (dx < 0 && index === items.length - 1)
+    const shift = atEdge ? dx * 0.28 : dx
+    page.style.transition = 'none'
+    page.style.transform = `translate3d(${shift}px,0,0)`
+    page.style.opacity = String(Math.max(0.55, 1 - Math.abs(shift) / 900))
+    if (Math.abs(dx) > 64 && Math.abs(dx) > Math.abs(dy) * 1.4) {
       const dir = dx < 0 ? 1 : -1
       sx = null
+      resetShift()
+      page.style.opacity = ''
       step(dir)
     }
   })
@@ -6786,6 +7110,9 @@ function openNewsReader(items, startIndex = 0) {
     sx = null
     sy = null
     pulled = 0
+    axis = null
+    resetShift()
+    page.style.opacity = ''
   }
   page.addEventListener('pointerup', release)
   page.addEventListener('pointercancel', release)
@@ -7350,14 +7677,14 @@ function renderTabBody(tabId, group, opts = {}) {
   return wrap
 }
 
-/** Вкладка «Учёба»: журнал с оценками и домашка — переключатель сверху. */
+/** Вкладка «Учёба»: журнал с оценками и домашка — переключатель в шапке вкладки. */
 function renderStudyTab() {
-  const wrap = el('div', { className: 'study-panel' })
+  const wrap = el('div', { className: 'panel study-panel' })
   const mode = state.studyMode === 'hw' ? 'hw' : 'grades'
   const chip = (id, label) =>
     el('button', {
       type: 'button',
-      className: `chip${mode === id ? ' chip-active' : ''}`,
+      className: `study-tab${mode === id ? ' is-on' : ''}`,
       text: label,
       onClick: () => {
         if (mode === id) return
@@ -7368,7 +7695,12 @@ function renderStudyTab() {
         else softUpdateNav()
       },
     })
-  wrap.append(el('div', { className: 'due-quick study-switch' }, [chip('grades', 'Журнал'), chip('hw', 'Домашка')]))
+  // Переключатель — часть шапки вкладки, а не отдельная «карточка с отступом».
+  wrap.append(
+    el('div', { className: 'study-head' }, [
+      el('div', { className: 'study-tabs' }, [chip('grades', 'Журнал'), chip('hw', 'Домашка')]),
+    ]),
+  )
   if (mode === 'hw') wrap.append(renderDays(), renderHwTab())
   else wrap.append(renderGradesTab(journalCtx()))
   return wrap
@@ -8560,7 +8892,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=138`, { scope: base })
+    .register(`${base}sw.js?v=139`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда

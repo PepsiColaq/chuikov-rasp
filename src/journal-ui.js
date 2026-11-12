@@ -1,4 +1,4 @@
-import { el } from './lib/security.js'
+﻿import { el } from './lib/security.js'
 import {
   addGrade as addGradeRpc,
   addStudent,
@@ -180,12 +180,12 @@ function renderOwnCodeForm(ctx) {
 
 function renderStudentDiary(ctx, session) {
   const mode = ctx.state.gradesMode === 'final' ? 'final' : 'current'
-  const wrap = el('div', { className: 'grades-diary' })
-  const switcher = el('div', { className: 'due-quick' }, [
+  const wrap = el('div', { className: 'diary' })
+  const switcher = el('div', { className: 'diary-switch' }, [
     el('button', {
       type: 'button',
       className: `chip${mode === 'current' ? ' chip-active' : ''}`,
-      text: 'Текущие',
+      text: 'Текущие оценки',
       onClick: () => {
         ctx.state.gradesMode = 'current'
         ctx.render()
@@ -201,11 +201,7 @@ function renderStudentDiary(ctx, session) {
       },
     }),
   ])
-  wrap.append(
-    el('p', { className: 'muted', text: session.label || 'Студент' }),
-    switcher,
-    renderOwnCodeForm(ctx),
-  )
+  wrap.append(switcher)
 
   const body = el('div', { text: 'Загружаем…' })
   wrap.append(body)
@@ -280,28 +276,31 @@ function paintFinal(body, rows) {
 
   const card = (s) => {
     const projected = projectedGrade(s.avg)
-    return el('div', { className: 'card final-row' }, [
-      el('div', { className: 'final-main' }, [
+    // Шкала 2..5 → 0..100%: видно, сколько не хватает до следующей оценки.
+    const pct = Number.isFinite(s.avg) ? Math.max(0, Math.min(100, ((s.avg - 2) / 3) * 100)) : 0
+    const tone = projected ? ` is-${projected}` : ''
+    return el('div', { className: `card final-row${tone}` }, [
+      el('div', { className: 'final-head' }, [
         el('span', { className: 'final-subject', text: s.subject }),
-        el('span', {
-          className: 'final-meta muted',
-          text: [
-            s.count ? `${s.count} ${s.count === 1 ? 'оценка' : s.count < 5 ? 'оценки' : 'оценок'}` : 'оценок нет',
-            s.absent ? `пропусков: ${s.absent}` : '',
-          ]
-            .filter(Boolean)
-            .join(' · '),
-        }),
+        Number.isFinite(s.avg)
+          ? el('span', { className: `final-badge is-${projected}`, text: `итог ${projected}` })
+          : el('span', { className: 'final-badge is-empty', text: 'нет данных' }),
       ]),
-      el('span', { className: 'final-side' }, [
-        el('span', {
-          className: `final-avg${projected ? ` grade-${projected}` : ''}`,
-          text: Number.isFinite(s.avg) ? s.avg.toFixed(2) : '—',
-        }),
-        el('span', {
-          className: 'final-projected muted',
-          text: projected ? `итог ≈ ${projected}` : 'нет данных',
-        }),
+      el('div', { className: 'final-bar' }, [
+        el('span', { className: `final-bar-fill${tone}`, style: `width:${pct.toFixed(1)}%` }),
+      ]),
+      el('div', { className: 'final-foot' }, [
+        el('span', { className: 'final-avg-wrap' }, [
+          el('strong', { className: 'final-avg', text: Number.isFinite(s.avg) ? s.avg.toFixed(2) : '—' }),
+          el('span', { className: 'final-avg-label muted', text: 'средний' }),
+        ]),
+        el('span', { className: 'final-chips' }, [
+          el('span', {
+            className: 'final-chip',
+            text: s.count ? `${s.count} ${plural(s.count)}` : 'оценок нет',
+          }),
+          s.absent ? el('span', { className: 'final-chip is-bad', text: `пропусков ${s.absent}` }) : null,
+        ]),
       ]),
     ])
   }
@@ -337,56 +336,187 @@ function paintFinal(body, rows) {
   )
 }
 
+const SUBJECT_WORDS = ['оценка', 'оценки', 'оценок']
+
+function plural(n, forms = SUBJECT_WORDS) {
+  const abs = Math.abs(n) % 100
+  const last = abs % 10
+  if (abs > 10 && abs < 20) return forms[2]
+  if (last === 1) return forms[0]
+  if (last >= 2 && last <= 4) return forms[1]
+  return forms[2]
+}
+
+/** Какая оценка по среднему — «5» зелёная, «3» жёлтая, ниже — красная. */
+function avgTone(avg) {
+  if (!Number.isFinite(avg)) return ''
+  if (avg >= 4.5) return 'is-5'
+  if (avg >= 3.5) return 'is-4'
+  if (avg >= 2.5) return 'is-3'
+  return 'is-2'
+}
+
+/**
+ * «Текущие оценки»: список предметов, каждый раскрывается в свои оценки.
+ * Раскрытый предмет показывает дату, тип работы и отметку — как в обычном журнале.
+ */
 function paintDiary(ctx, body, rows) {
   body.replaceChildren()
   if (!rows.length) {
-    body.append(el('div', { className: 'empty', text: 'Пока нет оценок и пропусков.' }))
+    body.append(
+      el('div', { className: 'card diary-empty' }, [
+        el('h3', { text: 'Оценок пока нет' }),
+        el('p', {
+          className: 'muted',
+          text: 'Как только преподаватель поставит первую отметку, она появится здесь по предметам.',
+        }),
+      ]),
+    )
     return
   }
+
   const bySubject = new Map()
   for (const row of rows) {
-    const key = row.subject || 'Предмет'
+    const key = String(row.subject || 'Предмет').trim() || 'Предмет'
     if (!bySubject.has(key)) bySubject.set(key, [])
     bySubject.get(key).push(row)
   }
+
   const nums = rows.map((r) => Number(r.grade)).filter((n) => n >= 2 && n <= 5)
-  const avg = nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(2) : '—'
-  body.append(el('p', { className: 'grades-avg', text: `Средний балл: ${avg}` }))
-  for (const [subject, list] of bySubject) {
-    const ordered = [...list].sort((a, b) => String(a.date).localeCompare(String(b.date)))
-    const line = el('div', { className: 'grade-line' })
-    for (const row of ordered) {
-      const att = row.attendance || 'present'
-      const label = row.grade != null && att === 'present' ? String(row.grade) : attendanceShort(att)
-      const tip = `${ctx.formatDateRu(String(row.date).slice(0, 10))} · ${row.start || ''} · ${row.subject}${
-        row.comment ? ` · ${row.comment}` : ''
-      }${row.author ? ` · ${row.author}` : ''}`
-      const open = ctx.state.gradeTip === row.id
-      line.append(
-        el('button', {
-          type: 'button',
-          className: `grade-chip ${gradeClass(row.grade == null ? null : Number(row.grade), att)}`,
-          text: label,
-          title: tip,
-          onClick: () => {
-            ctx.state.gradeTip = open ? '' : row.id
-            ctx.render()
-          },
+  const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : NaN
+  const absences = rows.filter((r) => ['absent', 'sick'].includes(String(r.attendance || ''))).length
+
+  body.append(
+    el('div', { className: 'card diary-summary' }, [
+      el('div', { className: 'diary-summary-cell' }, [
+        el('span', { className: 'diary-summary-label', text: 'Средний балл' }),
+        el('strong', {
+          className: `diary-summary-value ${avgTone(avg)}`,
+          text: Number.isFinite(avg) ? avg.toFixed(2) : '—',
         }),
-      )
-      if (open) {
-        line.append(el('span', { className: 'grade-tip', text: tip }))
+      ]),
+      el('div', { className: 'diary-summary-cell' }, [
+        el('span', { className: 'diary-summary-label', text: 'Предметов' }),
+        el('strong', { className: 'diary-summary-value', text: String(bySubject.size) }),
+      ]),
+      absences
+        ? el('div', { className: 'diary-summary-cell' }, [
+            el('span', { className: 'diary-summary-label', text: 'Пропусков' }),
+            el('strong', { className: 'diary-summary-value is-2', text: String(absences) }),
+          ])
+        : null,
+    ]),
+  )
+
+  const subjects = [...bySubject.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ru'))
+  const opened = String(ctx.state.openSubject || '')
+
+  for (const [subject, list] of subjects) {
+    const ordered = [...list].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+    const sNums = ordered.map((r) => Number(r.grade)).filter((n) => n >= 2 && n <= 5)
+    const sAvg = sNums.length ? sNums.reduce((a, b) => a + b, 0) / sNums.length : NaN
+    const isOpen = opened === subject
+
+    const head = el('button', {
+      type: 'button',
+      className: isOpen ? 'subject-head is-open' : 'subject-head',
+      onClick: () => {
+        haptic()
+        ctx.state.openSubject = isOpen ? '' : subject
+        ctx.render()
+      },
+    }, [
+      el('span', { className: 'subject-head-main' }, [
+        el('span', { className: 'subject-name', text: subject }),
+        el('span', { className: 'subject-meta' }, [
+          el('span', { text: `${sNums.length} ${plural(sNums.length)}` }),
+          ordered.length ? el('span', { className: 'subject-meta-sep', text: '·' }) : null,
+          ordered.length
+            ? el('span', { text: `${ordered.length} ${plural(ordered.length, ['запись', 'записи', 'записей'])}` })
+            : null,
+        ]),
+      ]),
+      el('span', { className: 'subject-head-side' }, [
+        sNums.length
+          ? el('span', { className: `subject-avg ${avgTone(sAvg)}`, text: sAvg.toFixed(2) })
+          : el('span', { className: 'subject-avg is-empty', text: '—' }),
+        el('span', { className: 'subject-chevron', text: isOpen ? '▴' : '▾' }),
+      ]),
+    ])
+
+    const card = el('div', { className: isOpen ? 'card subject-card is-open' : 'card subject-card' }, [head])
+
+    if (isOpen) {
+      const grid = el('div', { className: 'subject-marks' })
+      for (const row of ordered) {
+        const att = String(row.attendance || 'present')
+        const hasGrade = row.grade != null && att === 'present'
+        const label = hasGrade ? String(row.grade) : attendanceShort(att)
+        const dateLabel = row.date ? ctx.formatDateRu(String(row.date).slice(0, 10)) : ''
+        const kind = hasGrade
+          ? String(row.kind || '').trim()
+          : att === 'absent'
+            ? 'пропуск'
+            : att === 'sick'
+              ? 'по болезни'
+              : att === 'duty'
+                ? 'наряд'
+                : att === 'event'
+                  ? 'мероприятие'
+                  : att === 'excused'
+                    ? 'освобождение'
+                    : 'был(а)'
+        grid.append(
+          el('div', { className: 'subject-mark-row' }, [
+            el('span', {
+              className: `mark-badge ${gradeChipClass(hasGrade ? Number(row.grade) : null, att)}`,
+              text: label,
+            }),
+            el('span', { className: 'subject-mark-main' }, [
+              el('span', { className: 'subject-mark-kind', text: kind || (hasGrade ? 'работа' : '') }),
+              el('span', { className: 'subject-mark-meta' }, [
+                el('span', { text: dateLabel }),
+                row.start ? el('span', { className: 'subject-meta-sep', text: '·' }) : null,
+                row.start ? el('span', { text: row.start }) : null,
+              ]),
+            ]),
+            row.comment
+              ? el('span', { className: 'subject-mark-comment', text: row.comment, title: row.comment })
+              : null,
+          ]),
+        )
+      }
+      card.append(grid)
+      if (sNums.length) {
+        card.append(
+          el('p', {
+            className: 'subject-foot muted',
+            text: `Средний по предмету: ${sAvg.toFixed(2)} · итог ≈ ${projectedGrade(sAvg)}`,
+          }),
+        )
       }
     }
-    body.append(
-      el('div', { className: 'card grade-subject' }, [
-        el('h3', { text: subject }),
-        line,
-      ]),
-    )
+    body.append(card)
   }
 }
 
+
+function haptic() {
+  try {
+    navigator.vibrate?.(8)
+  } catch {
+    /* ignore */
+  }
+}
+
+function gradeChipClass(value, attendance) {
+  if (attendance === 'absent' || attendance === 'sick') return 'grade-bad'
+  if (value == null) return 'mark-neutral'
+  if (value === 5) return 'grade-5'
+  if (value === 4) return 'grade-4'
+  if (value === 3) return 'grade-3'
+  return 'grade-bad'
+}
 export function renderJournalOverlay(ctx) {
   const spec = ctx.state.journal
   if (!spec) return null

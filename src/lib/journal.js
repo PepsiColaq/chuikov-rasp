@@ -1,4 +1,4 @@
-import { supabase, supabaseConfigured, rpcErrorMessage } from './supabase.js'
+﻿import { supabase, supabaseConfigured, rpcErrorMessage } from './supabase.js'
 import { getSession } from './store.js'
 
 function parseJson(data) {
@@ -234,6 +234,39 @@ export async function listMyMarks() {
   return Array.isArray(rows) ? rows : []
 }
 
+/* ── Делегированные роли в группе ─────────────────────────────── */
+
+/** { me, deputyLimit, deputies, hwEditors } — кто я и кого назначили. */
+export async function staffList(groupId) {
+  const session = getSession()
+  const data = await rpc('rasp_staff_list', { p_token: session.token, p_group_id: groupId })
+  const payload = data || {}
+  return {
+    me: String(payload.me || 'student'),
+    deputyLimit: Number(payload.deputyLimit || 4),
+    deputies: Array.isArray(payload.deputies) ? payload.deputies : [],
+    hwEditors: Array.isArray(payload.hwEditors) ? payload.hwEditors : [],
+  }
+}
+
+/** Включить/выключить роль. kind: 'deputy' | 'hw'. */
+export async function staffSet(groupId, studentId, kind, on = true) {
+  const session = getSession()
+  const data = await rpc('rasp_staff_set', {
+    p_token: session.token,
+    p_group_id: groupId,
+    p_student_id: studentId,
+    p_kind: kind,
+    p_on: !!on,
+  })
+  const payload = data || {}
+  return {
+    me: String(payload.me || 'student'),
+    deputyLimit: Number(payload.deputyLimit || 4),
+    deputies: Array.isArray(payload.deputies) ? payload.deputies : [],
+    hwEditors: Array.isArray(payload.hwEditors) ? payload.hwEditors : [],
+  }
+}
 /* ── Роли и дополнительные админы ──────────────────────────────── */
 
 /** Поставить роль студенту: 'student' | 'starosta' | 'teacher'. */
