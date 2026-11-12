@@ -84,7 +84,7 @@ begin
     raise exception 'Неизвестная явка';
   end if;
 
-  v_label := left(coalesce(s.label, s.role), 64);
+  v_label := left(coalesce(nullif(trim(coalesce(s.label, '')), ''), s.role, 'Редактор'), 64);
 
   select id, updated_at into v_id, v_at from public.formation_marks
   where student_id = p_student_id and on_date = p_date;
@@ -188,7 +188,7 @@ begin
     raise exception 'Не хватает данных пары';
   end if;
 
-  v_label := left(coalesce(s.label, s.role), 64);
+  v_label := left(coalesce(nullif(trim(coalesce(s.label, '')), ''), s.role, 'Редактор'), 64);
 
   select id, attendance, grade, comment, updated_at
     into v_id, v_old_att, v_old_grade, v_old_comment, v_at
@@ -313,7 +313,7 @@ begin
     raise exception 'Слишком много оценок на пару';
   end if;
 
-  v_label := left(coalesce(s.label, s.role), 64);
+  v_label := left(coalesce(nullif(trim(coalesce(s.label, '')), ''), s.role, 'Редактор'), 64);
   v_id := 'jg_' || encode(gen_random_bytes(8), 'hex');
   insert into journal_grades(
     id, group_id, student_id, on_date, lesson_id, slot_start, slot_end,
