@@ -1,4 +1,4 @@
-﻿import './styles.css'
+import './styles.css'
 import { el } from './lib/security.js'
 import { breakMinutes, DAY_NAMES, DAY_SHORT } from './data/seed.js'
 import {
@@ -74,6 +74,11 @@ import {
   addNews,
   deleteNews,
   moveNews,
+  getPrograms,
+  refreshPrograms,
+  saveProgram,
+  deleteProgram,
+  moveProgram,
 } from './lib/store.js'
 import {
   canGradeGroup,
@@ -91,6 +96,9 @@ import {
   setOwnStudentCode,
   staffList,
   staffSet,
+  curatorsList,
+  curatorCreate,
+  curatorRevoke,
 } from './lib/journal.js'
 import { renderGradesTab, renderJournalOverlay, personSurname, personRest } from './journal-ui.js'
 import { supabaseConfigured, supabase, storageUrlCandidates, fetchStorageObjectUrl } from './lib/supabase.js'
@@ -182,6 +190,8 @@ const state = {
   newsCompose: false,
   /** Черновик новости между перерисовками: { title, body, pinned, attachments } */
   newsDraft: null,
+  /** Черновик программы в редакторе или null, если редактор закрыт */
+  programDraft: null,
   message: null,
   error: null,
 }
@@ -572,6 +582,8 @@ function canEdit(groupId) {
   const s = getSession()
   if (!s) return false
   if (s.role === 'admin') return true
+  // Куратор ведёт свои группы (или все, если groupId пустой) — как староста.
+  if (s.role === 'curator') return !s.groupId || s.groupId === groupId
   if (s.role === 'starosta' && s.allGroups) return true
   return s.role === 'starosta' && s.groupId === groupId
 }
@@ -638,6 +650,8 @@ function selectGroup(id) {
   state.groupId = id
   state.prevGroupId = ''
   state.newsIndex = 0
+  // Программы старосты привязаны к группе — при смене группы перечитываем.
+  programsLoaded.clear()
   localStorage.setItem(SELECTED_GROUP_KEY, id)
   state.tab = 'schedule'
   state.cascade = true
@@ -712,6 +726,10 @@ function sessionPillText(session) {
   if (session.role === 'student') {
     const who = shortPersonName((session.label || '').trim() || 'Студент')
     return `${who} · выйти`
+  }
+  if (session.role === 'curator') {
+    const who = shortPersonName((session.label || '').trim())
+    return who ? `${who} · выйти` : 'Куратор · выйти'
   }
   const who = shortPersonName((session.label || '').trim())
   return who ? `${who} · выйти` : 'Староста · выйти'
@@ -4920,6 +4938,146 @@ function renderAdminPanel() {
     box.append(wrapAdminAcc('admins', 'Админы', null))
   }
 
+  // —— Кураторы: админ выдаёт код, куратор ведёт старост и права
+  if (isAdminSectionOpen('curators')) {
+    const curSec = el('div', { className: 'curator-admin' })
+    const label = el('input', { maxlength: '60', placeholder: 'Кобзева Анна' })
+    const code = el('input', {
+      maxlength: '64',
+      placeholder: 'Код куратора (от 8 символов)',
+      autocomplete: 'off',
+    })
+    const groupPick = el(
+      'select',
+      {},
+      [
+        el('option', { value: '', text: 'Все группы колледжа' }),
+        ...listGroups().map((g) => el('option', { value: g.id, text: g.name })),
+      ],
+    )
+    const genBtn = el('button', {
+      type: 'button',
+      className: 'journal-link',
+      text: 'Придумать код',
+      onClick: () => {
+        code.value = newStudentCode()
+      },
+    })
+    const form = el('form', {})
+    form.append(
+      el('p', {
+        className: 'muted',
+        style: 'margin:0 0 10px;font-size:13px',
+        text: 'Куратор назначает старост, выдаёт права (зам/ДЗ/лента), ведёт журнал и построение в своих группах.',
+      }),
+      el('div', { className: 'field' }, [el('label', { text: 'Имя куратора' }), label]),
+      el('div', { className: 'field' }, [el('label', { text: 'Группа' }), groupPick]),
+      el('div', { className: 'field' }, [
+        el('label', { text: 'Код входа' }),
+        code,
+        el('div', { style: 'margin-top:6px' }, [genBtn]),
+      ]),
+      el('button', { className: 'btn', type: 'submit', text: 'Назначить куратора' }),
+    )
+    const listBox = el('div', { className: 'curator-list' })
+
+    const paint = async () => {
+      listBox.replaceChildren(el('p', { className: 'muted', text: 'Загружаем…' }))
+      try {
+        const rows = await curatorsList()
+        listBox.replaceChildren()
+        if (!rows.length) {
+          listBox.append(
+            el('p', {
+              className: 'muted',
+              style: 'margin:0;font-size:12.5px',
+              text: 'Кураторов пока нет.',
+            }),
+          )
+          return
+        }
+        for (const row of rows) {
+          const codeText = String(row.code || '').trim()
+          listBox.append(
+            el('div', { className: 'curator-row' }, [
+              el('div', { className: 'curator-row-main' }, [
+                el('strong', { text: row.label || 'Куратор' }),
+                el('span', {
+                  className: 'muted',
+                  text: row.groupName || 'все группы',
+                }),
+              ]),
+              codeText
+                ? el('button', {
+                    type: 'button',
+                    className: 'btn secondary',
+                    text: 'Копировать код',
+                    onClick: async () => {
+                      try {
+                        await navigator.clipboard.writeText(codeText)
+                        showToast('Код скопирован')
+                      } catch {
+                        showToast(codeText)
+                      }
+                    },
+                  })
+                : null,
+              el('button', {
+                type: 'button',
+                className: 'btn danger',
+                text: 'Убрать',
+                onClick: async () => {
+                  if (!confirm(`Убрать куратора «${row.label || ''}»?`)) return
+                  try {
+                    await curatorRevoke(row.id)
+                    showToast('Куратор убран')
+                    paint()
+                  } catch (err) {
+                    showToast(err.message, true)
+                  }
+                },
+              }),
+            ]),
+          )
+        }
+      } catch (err) {
+        const msg = String(err?.message || '')
+        listBox.replaceChildren(
+          el('p', {
+            className: 'muted',
+            style: 'margin:0',
+            text: /PGRST202|could not find the function|does not exist|schema cache/i.test(msg)
+              ? 'Кураторы ещё не включены: выполни supabase/curators.sql и curators_admin.sql.'
+              : msg || 'Не удалось загрузить кураторов',
+          }),
+        )
+      }
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const btn = form.querySelector('button[type="submit"]')
+      if (btn) btn.disabled = true
+      try {
+        const created = await curatorCreate(groupPick.value || null, label.value.trim(), code.value.trim())
+        showToast(`Куратор назначен. Код: ${created?.code || code.value.trim()}`)
+        label.value = ''
+        code.value = ''
+        paint()
+      } catch (err) {
+        showToast(err.message, true)
+      } finally {
+        if (btn) btn.disabled = false
+      }
+    })
+
+    curSec.append(form, el('div', { style: 'margin-top:14px' }, [listBox]))
+    box.append(wrapAdminAcc('curators', 'Кураторы', [curSec]))
+    paint()
+  } else {
+    box.append(wrapAdminAcc('curators', 'Кураторы', null))
+  }
+
   // —— Группы (спойлер)
   if (isAdminSectionOpen('groups')) {
   const groupsSec = el('div', {})
@@ -5247,6 +5405,10 @@ function moreSvg(kind) {
     contact:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2.5"/><circle cx="10" cy="10.5" r="2"/><path d="M7 16c.7-1.6 1.7-2.4 3-2.4s2.3.8 3 2.4"/><path d="M16 9.5h2M16 12.5h2"/></svg>',
     key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="8" cy="8" r="3.6"/><path d="M10.7 10.7L20 20M17 17l2-2M14.5 14.5l2-2"/></svg>',
+    book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5z"/><path d="M8.5 7.5h6M8.5 11h4"/></svg>',
+    club:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v3.3M12 17.2v3.3M3.5 12h3.3M17.2 12h3.3"/></svg>',
+    help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.7 1.1c0 1.7-2.3 1.9-2.3 3.6"/><path d="M12 17.3h.01"/></svg>',
     chevron:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>',
   }
@@ -5378,6 +5540,9 @@ function renderMore() {
   if (state.moreScreen === 'group') return renderMoreGroup()
   if (state.moreScreen === 'contacts') return renderMoreContacts()
   if (state.moreScreen === 'mycode') return renderMoreMyCode()
+  if (state.moreScreen === 'dpo') return renderPrograms('dpo')
+  if (state.moreScreen === 'clubs') return renderPrograms('club')
+  if (state.moreScreen === 'support') return renderMoreSupport()
   return MORE_UI_V2 ? renderMoreV2() : renderMoreClassic()
 }
 
@@ -5636,8 +5801,8 @@ function paintStaffCard(host, students) {
   }
 
   const build = (data) => {
-    const canEdit = ['admin', 'starosta', 'deputy'].includes(data.me)
-    const canSetDeputy = ['admin', 'starosta'].includes(data.me)
+    const canEdit = ['admin', 'curator', 'starosta', 'deputy'].includes(data.me)
+    const canSetDeputy = ['admin', 'curator', 'starosta'].includes(data.me)
     if (!canEdit) {
       host.remove()
       return
@@ -5649,7 +5814,7 @@ function paintStaffCard(host, students) {
     const hwIds = new Set(hwEditors.map((d) => String(d.studentId)))
     const newsIds = new Set(newsEditors.map((d) => String(d.studentId)))
     const meDeputyCount = deputies.length
-    const canSetNews = ['admin', 'starosta', 'deputy'].includes(data.me)
+    const canSetNews = ['admin', 'curator', 'starosta', 'deputy'].includes(data.me)
 
     const apply = async (studentId, kind, on) => {
       try {
@@ -5968,16 +6133,24 @@ function renderMoreV2() {
     const customLabel = (session.label || '').trim()
     const label =
       customLabel ||
-      (session.role === 'admin' ? 'Никитос' : session.role === 'student' ? 'Студент' : 'Староста')
+      (session.role === 'admin'
+        ? 'Никитос'
+        : session.role === 'curator'
+          ? 'Куратор'
+          : session.role === 'student'
+            ? 'Студент'
+            : 'Староста')
     const letter = label.charAt(0).toUpperCase() || '?'
     // Имя сверху (Кобзева), синий бейдж — отдельная подпись (Командир), иначе «Староста»
     const customRole = (session.roleTitle || '').trim()
     const roleText =
       session.role === 'admin'
         ? 'Админ'
-        : session.role === 'student'
-          ? 'Студент'
-          : customRole || (session.role === 'starosta' ? 'Староста' : 'Редактор')
+        : session.role === 'curator'
+          ? 'Куратор'
+          : session.role === 'student'
+            ? 'Студент'
+            : customRole || (session.role === 'starosta' ? 'Староста' : 'Редактор')
     const avaUrl = PROFILE_AVATARS ? (session.avatarUrl || '').trim() : ''
     const avatarNode = avaUrl
       ? el('div', { className: 'more-avatar more-avatar-photo' }, [
@@ -6068,6 +6241,33 @@ function renderMoreV2() {
       sub: 'Отмены и переносы пар',
       onClick: () => {
         state.moreScreen = 'overrides'
+        render({ force: true })
+      },
+    }),
+    moreSettingsRow({
+      icon: 'book',
+      title: 'Доп. образование',
+      sub: 'Программы и набор групп',
+      onClick: () => {
+        state.moreScreen = 'dpo'
+        render({ force: true })
+      },
+    }),
+    moreSettingsRow({
+      icon: 'club',
+      title: 'Кружки и секции',
+      sub: 'Куда можно записаться',
+      onClick: () => {
+        state.moreScreen = 'clubs'
+        render({ force: true })
+      },
+    }),
+    moreSettingsRow({
+      icon: 'help',
+      title: 'Техподдержка',
+      sub: 'Написать в поддержку',
+      onClick: () => {
+        state.moreScreen = 'support'
         render({ force: true })
       },
     }),
@@ -6707,6 +6907,985 @@ function clearCascadeAnim(root) {
   root.querySelectorAll?.('.do-cascade').forEach((n) => n.classList.remove('do-cascade'))
 }
 
+/* ================= Доп. образование и кружки ================= */
+
+const PROGRAM_KINDS = {
+  dpo: {
+    title: 'Доп. образование',
+    kicker: 'Программы обучения и набор групп',
+    empty: 'Программ пока нет',
+    emptyHint: 'Куратор, староста или админ может добавить первую программу.',
+  },
+  club: {
+    title: 'Кружки и секции',
+    kicker: 'Куда можно записаться',
+    empty: 'Кружков пока нет',
+    emptyHint: 'Куратор, староста или админ может добавить первый кружок.',
+  },
+}
+
+/** Какие разделы уже подтянули данные с сервера в этой сессии. */
+const programsLoaded = new Set()
+
+function programImages(item) {
+  return (item.attachments || []).filter(
+    (a) => /^image\//i.test(a.mime || '') || /\.(jpe?g|png|webp|gif)$/i.test(a.url || ''),
+  )
+}
+
+/** Видео можно указать относительным путём — тогда файл лежит в public/. */
+function programVideoSrc(url) {
+  const u = String(url || '').trim()
+  if (!u) return ''
+  if (/^https?:\/\//i.test(u)) return u
+  const base = import.meta.env.BASE_URL || '/chuikov-rasp/'
+  return `${base}${u.replace(/^\/+/, '')}`
+}
+
+/** Кто может добавлять и править программы: админ, куратор, староста. */
+function canManagePrograms() {
+  const s = getSession()
+  if (!s) return false
+  if (s.role === 'admin' || s.role === 'curator') return true
+  return canEdit(state.groupId)
+}
+
+/** Программа, добавленная старостой, видна только его группе; админ и куратор — всем. */
+function programGroupId() {
+  const s = getSession()
+  if (!s) return null
+  if (s.role === 'admin' || s.role === 'curator') return null
+  return state.groupId || null
+}
+
+function programMetaLine(item) {
+  return [item.duration, item.price].filter(Boolean).join(' · ')
+}
+
+function emptyProgramDraft(kind) {
+  return {
+    id: null,
+    kind,
+    groupId: programGroupId(),
+    title: '',
+    subtitle: '',
+    body: '',
+    attachments: [],
+    details: [],
+    price: '',
+    duration: '',
+    contact: '',
+    videoUrl: '',
+    pinned: false,
+  }
+}
+
+function renderPrograms(kind) {
+  const cfg = PROGRAM_KINDS[kind] || PROGRAM_KINDS.dpo
+  const groupId = state.groupId || null
+  const canManage = canManagePrograms()
+
+  const panel = el('div', { className: 'panel program-panel' }, [
+    el('button', {
+      type: 'button',
+      className: 'btn secondary',
+      text: '← Профиль',
+      onClick: () => {
+        state.moreScreen = ''
+        state.programDraft = null
+        render({ force: true })
+      },
+    }),
+    el('div', { className: 'program-head' }, [
+      el('div', { className: 'program-head-text' }, [
+        el('h2', { className: 'program-head-title', text: cfg.title }),
+        el('p', { className: 'program-head-sub', text: cfg.kicker }),
+      ]),
+      canManage
+        ? el('button', {
+            type: 'button',
+            className: 'program-add',
+            text: '+',
+            title: 'Добавить',
+            onClick: () => {
+              hapticTap()
+              state.programDraft = emptyProgramDraft(kind)
+              if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+            },
+          })
+        : null,
+    ]),
+  ])
+
+  // Редактор открыт поверх списка: человек видит и форму, и что уже есть.
+  if (state.programDraft && state.programDraft.kind === kind) {
+    panel.append(renderProgramEditor(kind))
+  }
+
+  const listBox = el('div', { className: 'program-list' })
+  panel.append(listBox)
+
+  const paint = (rows) => {
+    listBox.replaceChildren()
+    if (!rows.length) {
+      listBox.append(
+        el('div', { className: 'program-empty' }, [
+          el('p', { className: 'program-empty-title', text: cfg.empty }),
+          el('p', { className: 'program-empty-text', text: cfg.emptyHint }),
+        ]),
+      )
+      return
+    }
+    rows.forEach((item, i) => {
+      const imgs = programImages(item)
+      listBox.append(
+        el(
+          'button',
+          {
+            type: 'button',
+            className: `program-card${item.pinned ? ' is-pinned' : ''}`,
+            onClick: () => {
+              hapticTap()
+              openProgramReader(rows, i, kind)
+            },
+          },
+          [
+            imgs.length
+              ? el('span', { className: 'program-card-thumb' }, [
+                  el('img', {
+                    src: imgs[0].url,
+                    alt: '',
+                    loading: 'lazy',
+                    decoding: 'async',
+                    referrerpolicy: 'no-referrer',
+                  }),
+                ])
+              : el('span', {
+                  className: 'program-card-thumb is-blank',
+                  'aria-hidden': 'true',
+                  text: (item.title || '?').charAt(0).toUpperCase(),
+                }),
+            el('span', { className: 'program-card-body' }, [
+              item.pinned
+                ? el('span', { className: 'program-card-pin', text: 'Главное' })
+                : null,
+              el('span', { className: 'program-card-title', text: item.title }),
+              item.subtitle ? el('span', { className: 'program-card-sub', text: item.subtitle }) : null,
+              programMetaLine(item)
+                ? el('span', { className: 'program-card-meta', text: programMetaLine(item) })
+                : null,
+            ]),
+            el('span', { className: 'program-card-chev', 'aria-hidden': 'true', text: '›' }),
+          ],
+        ),
+      )
+    })
+  }
+
+  paint(getPrograms(kind, groupId))
+
+  if (!programsLoaded.has(kind)) {
+    programsLoaded.add(kind)
+    refreshPrograms(kind, groupId)
+      .then((rows) => paint(rows))
+      .catch((err) => {
+        programsLoaded.delete(kind)
+        const msg = String(err?.message || '')
+        if (/PGRST202|could not find the function|does not exist|schema cache/i.test(msg)) {
+          listBox.replaceChildren(
+            el('div', { className: 'program-empty' }, [
+              el('p', { className: 'program-empty-title', text: 'Раздел ещё не включён' }),
+              el(
+                'p',
+                {
+                  className: 'program-empty-text',
+                  text: 'Выполни supabase/programs.sql в Supabase → SQL Editor.',
+                },
+              ),
+            ]),
+          )
+        } else if (!getPrograms(kind, groupId).length) {
+          listBox.replaceChildren(
+            el('div', { className: 'program-empty' }, [
+              el('p', { className: 'program-empty-title', text: 'Не удалось загрузить' }),
+              el('p', { className: 'program-empty-text', text: msg || 'Проверь связь.' }),
+            ]),
+          )
+        }
+      })
+  }
+
+  return panel
+}
+
+/** Полноэкранный просмотр программы: как у событий, только с таблицей и видео. */
+function openProgramReader(items, startIndex = 0, kind = 'dpo') {
+  if (!items?.length) return
+  let list = items
+  let index = Math.max(0, Math.min(startIndex, items.length - 1))
+  closeHwLightbox({ animate: false })
+  document.querySelectorAll('.news-reader').forEach((n) => n.remove())
+
+  const overlay = el('div', {
+    className: 'news-reader program-reader',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': PROGRAM_KINDS[kind]?.title || 'Программа',
+  })
+  const page = el('div', { className: 'news-reader-page' })
+
+  let closing = false
+  const close = () => {
+    if (closing) return
+    closing = true
+    overlay.classList.remove('is-open')
+    overlay.classList.add('is-closing')
+    document.documentElement.classList.remove('news-reader-open')
+    document.body.classList.remove('news-reader-open')
+    window.setTimeout(() => overlay.remove(), 260)
+  }
+
+  const paint = () => {
+    const item = list[index] || {}
+    const images = programImages(item)
+    const cover = images[0]
+    const canEditProgram = canManagePrograms()
+    const video = programVideoSrc(item.videoUrl)
+    const place = item.subtitle || PROGRAM_KINDS[kind]?.title || ''
+
+    const hero = el('div', { className: 'news-reader-hero' }, [
+      cover
+        ? el('div', {
+            className: 'news-reader-blur',
+            'aria-hidden': 'true',
+            style: `background-image:url("${cover.url}")`,
+          })
+        : null,
+      cover
+        ? el('img', {
+            className: 'news-reader-cover',
+            src: cover.url,
+            alt: item.title || '',
+            decoding: 'async',
+            referrerpolicy: 'no-referrer',
+          })
+        : el('div', { className: 'news-reader-cover news-reader-cover-blank', 'aria-hidden': 'true' }),
+      el('div', { className: 'news-reader-scrim', 'aria-hidden': 'true' }),
+      images.length > 1
+        ? el('button', {
+            type: 'button',
+            className: 'news-reader-zoom',
+            text: `Все фото · ${images.length}`,
+            onClick: () => {
+              hapticTap()
+              openHwLightbox(images.map((x) => x.url), 0)
+            },
+          })
+        : null,
+      el('div', { className: 'news-reader-head' }, [
+        el('div', { className: 'program-reader-tags' }, [
+          item.pinned ? el('span', { className: 'news-reader-pin', text: 'Главное' }) : null,
+          el('span', { className: 'program-reader-kind', text: place }),
+        ]),
+        el('h1', { className: 'news-reader-title', text: item.title }),
+        item.subtitle
+          ? el('p', { className: 'program-reader-sub', text: item.subtitle })
+          : null,
+        el('p', { className: 'news-reader-date' }, [
+          item.duration ? el('span', { text: item.duration }) : null,
+          item.duration && item.price ? el('span', { className: 'news-reader-dot-sep', text: '·' }) : null,
+          item.price ? el('span', { text: item.price }) : null,
+        ]),
+      ]),
+    ])
+
+    const extra = images.slice(1)
+
+    const facts = []
+    if (item.duration) facts.push(['Срок обучения', item.duration])
+    if (item.price) facts.push(['Стоимость', item.price])
+
+    const headFacts = facts.length
+      ? el(
+          'div',
+          { className: 'program-facts' },
+          facts.map(([k, v]) =>
+            el('div', { className: 'program-fact' }, [
+              el('span', { className: 'program-fact-k', text: k }),
+              el('span', { className: 'program-fact-v', text: v }),
+            ]),
+          ),
+        )
+      : null
+
+    const details = (item.details || []).length
+      ? el(
+          'div',
+          { className: 'program-details' },
+          [
+            el('h2', { className: 'program-section-title', text: 'Что важно знать' }),
+            el(
+              'dl',
+              { className: 'program-details-list' },
+              (item.details || []).flatMap((d) => [
+                el('dt', { text: d.label || '' }),
+                el('dd', { text: d.value || '' }),
+              ]),
+            ),
+          ],
+        )
+      : null
+
+    const videoBox = video
+      ? el('div', { className: 'program-video' }, [
+          el('video', {
+            className: 'program-video-el',
+            src: video,
+            controls: true,
+            muted: true,
+            playsinline: true,
+            preload: 'metadata',
+          }),
+        ])
+      : null
+
+    const contact = item.contact
+      ? el('div', { className: 'program-contact' }, [
+          el('span', { className: 'program-contact-k', text: 'Записаться и спросить' }),
+          el('span', { className: 'program-contact-v', text: item.contact }),
+        ])
+      : null
+
+    const body = el('div', { className: 'news-reader-content' }, [
+      headFacts,
+      videoBox,
+      item.body
+        ? el('p', { className: 'news-reader-text', text: item.body })
+        : el('p', { className: 'news-reader-text news-reader-text-muted', text: 'Описания пока нет.' }),
+      details,
+      extra.length
+        ? el(
+            'div',
+            { className: 'news-reader-extra' },
+            extra.map((a, i) =>
+              el('img', {
+                className: 'news-reader-extra-photo',
+                src: a.url,
+                alt: '',
+                loading: 'lazy',
+                decoding: 'async',
+                referrerpolicy: 'no-referrer',
+                onClick: () => {
+                  hapticTap()
+                  openHwLightbox(images.map((x) => x.url), i + 1)
+                },
+              }),
+            ),
+          )
+        : null,
+      contact,
+      list.length > 1
+        ? el('div', { className: 'news-reader-foot' }, [
+            el('span', { className: 'news-reader-foot-count', text: `${index + 1} из ${list.length}` }),
+          ])
+        : null,
+    ])
+
+    const pager =
+      list.length > 1
+        ? el('nav', { className: 'news-reader-pager' }, [
+            el('button', {
+              type: 'button',
+              className: 'news-reader-pager-btn',
+              text: '‹',
+              'aria-label': 'Предыдущая программа',
+              disabled: index === 0,
+              onClick: () => step(-1),
+            }),
+            el(
+              'div',
+              { className: 'news-reader-pager-dots' },
+              list.map((n, i) =>
+                el('button', {
+                  type: 'button',
+                  className: i === index ? 'news-reader-pager-dot is-on' : 'news-reader-pager-dot',
+                  'aria-label': `Программа ${i + 1}`,
+                  onClick: () => {
+                    if (i === index) return
+                    index = i
+                    paint()
+                    page.scrollTop = 0
+                  },
+                }),
+              ),
+            ),
+            el('button', {
+              type: 'button',
+              className: 'news-reader-pager-btn',
+              text: '›',
+              'aria-label': 'Следующая программа',
+              disabled: index >= list.length - 1,
+              onClick: () => step(1),
+            }),
+          ])
+        : null
+
+    page.replaceChildren(
+      hero,
+      body,
+      el('div', { className: 'news-reader-toolbar' }, [
+        canEditProgram
+          ? el('button', {
+              type: 'button',
+              className: 'news-reader-tool is-up',
+              text: 'Выше',
+              title: 'Показывать раньше',
+              onClick: () => move(-1),
+            })
+          : null,
+        canEditProgram
+          ? el('button', {
+              type: 'button',
+              className: 'news-reader-tool is-down',
+              text: 'Ниже',
+              title: 'Показывать позже',
+              onClick: () => move(1),
+            })
+          : null,
+        canEditProgram
+          ? el('button', {
+              type: 'button',
+              className: 'news-reader-tool',
+              text: 'Изменить',
+              onClick: () => edit(),
+            })
+          : null,
+        canEditProgram
+          ? el('button', {
+              type: 'button',
+              className: 'news-reader-tool is-del',
+              text: 'Удалить',
+              onClick: () => removeItem(),
+            })
+          : null,
+      ]),
+      pager,
+    )
+  }
+
+  const step = (delta) => {
+    const next = index + delta
+    if (next < 0 || next >= list.length) return
+    hapticTap()
+    index = next
+    paint()
+    page.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const move = async (dir) => {
+    const item = list[index]
+    if (!item) return
+    hapticTap()
+    try {
+      await moveProgram(item.id, dir, kind, state.groupId)
+      const fresh = getPrograms(kind, state.groupId)
+      const at = fresh.findIndex((p) => p.id === item.id)
+      index = at < 0 ? 0 : at
+      list = fresh
+      showToast(dir < 0 ? 'Подняли выше' : 'Опустили ниже')
+      paint()
+      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+    } catch (err) {
+      showToast(err.message, true)
+    }
+  }
+
+  const edit = () => {
+    const item = list[index]
+    if (!item) return
+    hapticTap()
+    state.programDraft = {
+      id: item.id,
+      kind: item.kind || kind,
+      groupId: item.groupId || null,
+      title: item.title,
+      subtitle: item.subtitle,
+      body: item.body,
+      attachments: item.attachments.slice(),
+      details: (item.details || []).map((d) => ({ label: d.label, value: d.value })),
+      price: item.price,
+      duration: item.duration,
+      contact: item.contact,
+      videoUrl: item.videoUrl,
+      pinned: item.pinned,
+    }
+    close()
+    if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+  }
+
+  const removeItem = async () => {
+    const item = list[index]
+    if (!item) return
+    if (!confirm(`Удалить «${item.title}»?`)) return
+    try {
+      await deleteProgram(item.id)
+      showToast('Удалено')
+      close()
+      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+    } catch (err) {
+      showToast(err.message, true)
+    }
+  }
+
+  paint()
+
+  overlay.append(
+    el('button', {
+      type: 'button',
+      className: 'news-reader-close',
+      text: '✕',
+      'aria-label': 'Закрыть',
+      onClick: close,
+    }),
+    page,
+  )
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close()
+  })
+
+  // Свайп: горизонтально — соседняя программа, вертикально — прокрутка.
+  let sx = null
+  let sy = null
+  let pulled = 0
+  let axis = null
+  const resetShift = (animate = true) => {
+    page.style.transition = animate ? 'transform 220ms cubic-bezier(0.22,0.61,0.36,1)' : 'none'
+    page.style.transform = ''
+  }
+  page.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    sx = e.clientX
+    sy = e.clientY
+    pulled = 0
+    axis = null
+  })
+  page.addEventListener('pointermove', (e) => {
+    if (sx == null) return
+    const dx = e.clientX - sx
+    const dy = e.clientY - sy
+    if (!axis) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+      axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
+    }
+    if (axis === 'y') {
+      pulled = page.scrollTop <= 0 ? dy : 0
+      return
+    }
+    const atEdge = (dx > 0 && index === 0) || (dx < 0 && index === list.length - 1)
+    const shift = atEdge ? dx * 0.28 : dx
+    page.style.transition = 'none'
+    page.style.transform = `translate3d(${shift}px,0,0)`
+    page.style.opacity = String(Math.max(0.55, 1 - Math.abs(shift) / 900))
+    if (Math.abs(dx) > 64 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      const dir = dx < 0 ? 1 : -1
+      sx = null
+      resetShift()
+      page.style.opacity = ''
+      step(dir)
+    }
+  })
+  const release = () => {
+    if (pulled > 110 && page.scrollTop <= 0) close()
+    sx = null
+    sy = null
+    pulled = 0
+    axis = null
+    resetShift()
+    page.style.opacity = ''
+  }
+  page.addEventListener('pointerup', release)
+  page.addEventListener('pointercancel', release)
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') close()
+    else if (e.key === 'ArrowLeft') step(-1)
+    else if (e.key === 'ArrowRight') step(1)
+  }
+  document.addEventListener('keydown', onKey)
+  overlay.addEventListener('remove', () => document.removeEventListener('keydown', onKey))
+
+  document.body.append(overlay)
+  document.documentElement.classList.add('news-reader-open')
+  document.body.classList.add('news-reader-open')
+  if (motionOk()) requestAnimationFrame(() => overlay.classList.add('is-open'))
+  else overlay.classList.add('is-open')
+}
+
+/** Форма добавления и правки программы. Черновик живёт в state — ввод не теряется. */
+function renderProgramEditor(kind) {
+  const draft = state.programDraft
+  const cfg = PROGRAM_KINDS[kind] || PROGRAM_KINDS.dpo
+  const card = el('section', { className: 'card program-editor' })
+
+  const grow = (node) => {
+    node.style.height = 'auto'
+    node.style.height = `${node.scrollHeight}px`
+  }
+
+  const title = el('textarea', {
+    className: 'news-compose-grow',
+    rows: '1',
+    maxlength: '160',
+    placeholder: 'Например: «Оператор БПЛА»',
+  })
+  title.value = draft.title || ''
+
+  const subtitle = el('input', {
+    type: 'text',
+    maxlength: '300',
+    placeholder: 'Короткая подпись под заголовком',
+    value: draft.subtitle || '',
+  })
+
+  const body = el('textarea', {
+    className: 'news-compose-grow',
+    rows: '4',
+    maxlength: '12000',
+    placeholder: 'Что за программа, для кого, чему научат…',
+  })
+  body.value = draft.body || ''
+
+  const price = el('input', {
+    type: 'text',
+    maxlength: '120',
+    placeholder: '15 000 ₽',
+    value: draft.price || '',
+  })
+  const duration = el('input', {
+    type: 'text',
+    maxlength: '120',
+    placeholder: '6 недель (76 часов)',
+    value: draft.duration || '',
+  })
+  const contact = el('input', {
+    type: 'text',
+    maxlength: '300',
+    placeholder: 'Сысоев А. А., 8 (916)-286-61-75, каб. 211',
+    value: draft.contact || '',
+  })
+  const videoUrl = el('input', {
+    type: 'text',
+    maxlength: '500',
+    placeholder: 'video/dpo-intro.mp4 или ссылка',
+    value: draft.videoUrl || '',
+  })
+
+  const pinned = el('input', { type: 'checkbox' })
+  pinned.checked = !!draft.pinned
+
+  // —— Характеристики: пары «что — значение»
+  const detailsBox = el('div', { className: 'program-editor-details' })
+  const paintDetails = () => {
+    detailsBox.replaceChildren()
+    draft.details.forEach((row, i) => {
+      const label = el('input', {
+        type: 'text',
+        maxlength: '80',
+        placeholder: 'Форма обучения',
+        value: row.label || '',
+      })
+      const value = el('input', {
+        type: 'text',
+        maxlength: '400',
+        placeholder: 'Очная с применением ДОТ',
+        value: row.value || '',
+      })
+      label.addEventListener('input', () => {
+        row.label = label.value
+      })
+      value.addEventListener('input', () => {
+        row.value = value.value
+      })
+      detailsBox.append(
+        el('div', { className: 'program-editor-detail-row' }, [
+          label,
+          value,
+          el('button', {
+            type: 'button',
+            className: 'program-editor-x',
+            text: '×',
+            title: 'Убрать строку',
+            onClick: () => {
+              draft.details.splice(i, 1)
+              paintDetails()
+            },
+          }),
+        ]),
+      )
+    })
+    detailsBox.append(
+      el('button', {
+        type: 'button',
+        className: 'program-editor-addrow',
+        text: '+ строка',
+        onClick: () => {
+          draft.details.push({ label: '', value: '' })
+          paintDetails()
+        },
+      }),
+    )
+  }
+  paintDetails()
+
+  // —— Фото
+  const file = el('input', {
+    type: 'file',
+    accept: 'image/jpeg,image/png,image/webp,image/gif',
+    multiple: true,
+  })
+  const preview = el('div', { className: 'news-compose-preview' })
+  const paintPreview = () => {
+    preview.replaceChildren()
+    if (!draft.attachments.length) {
+      preview.append(el('p', { className: 'muted', text: 'Фото не выбрано' }))
+      return
+    }
+    draft.attachments.forEach((a, i) => {
+      preview.append(
+        el('div', { className: 'news-compose-thumb' }, [
+          el('img', { src: a.url, alt: a.name || '', loading: 'lazy', decoding: 'async' }),
+          el('button', {
+            type: 'button',
+            className: 'news-compose-thumb-x',
+            text: '×',
+            title: 'Убрать',
+            onClick: () => {
+              draft.attachments.splice(i, 1)
+              paintPreview()
+            },
+          }),
+        ]),
+      )
+    })
+  }
+  paintPreview()
+
+  file.addEventListener('change', async () => {
+    if (!file.files?.length) return
+    const room = MAX_NEWS_PHOTOS - draft.attachments.length
+    if (room <= 0) {
+      showToast(`Максимум ${MAX_NEWS_PHOTOS} фото`, true)
+      file.value = ''
+      return
+    }
+    try {
+      const picked = [...file.files].slice(0, Math.min(room, 4))
+      showToast('Загружаю фото…')
+      const uploaded = await uploadHomeworkFiles(state.groupId, picked)
+      draft.attachments.push(...uploaded)
+      paintPreview()
+    } catch (err) {
+      showToast(err.message, true)
+    } finally {
+      file.value = ''
+    }
+  })
+
+  ;[
+    [title, 'title'],
+    [subtitle, 'subtitle'],
+    [body, 'body'],
+    [price, 'price'],
+    [duration, 'duration'],
+    [contact, 'contact'],
+    [videoUrl, 'videoUrl'],
+  ].forEach(([node, key]) => {
+    node.addEventListener('input', () => {
+      draft[key] = node.value
+      if (node.tagName === 'TEXTAREA') grow(node)
+    })
+  })
+  title.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      subtitle.focus()
+    }
+  })
+  pinned.addEventListener('change', () => {
+    draft.pinned = pinned.checked
+  })
+  requestAnimationFrame(() => {
+    grow(title)
+    grow(body)
+  })
+
+  const submit = el('button', {
+    className: 'btn',
+    type: 'submit',
+    text: draft.id ? 'Сохранить' : 'Опубликовать',
+  })
+  const cancel = el('button', {
+    type: 'button',
+    className: 'btn btn-ghost',
+    text: 'Отмена',
+    onClick: () => {
+      state.programDraft = null
+      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+    },
+  })
+
+  const form = el('form', { className: 'news-compose-form' }, [
+    el('div', { className: 'news-compose-head' }, [
+      el('h3', {
+        className: 'news-compose-title',
+        text: draft.id ? 'Правка программы' : `Новая программа · ${cfg.title}`,
+      }),
+    ]),
+    el('div', { className: 'field' }, [el('label', { text: 'Заголовок' }), title]),
+    el('div', { className: 'field' }, [el('label', { text: 'Подпись' }), subtitle]),
+    el('div', { className: 'field' }, [el('label', { text: 'Описание' }), body]),
+    el('div', { className: 'program-editor-pair' }, [
+      el('div', { className: 'field' }, [el('label', { text: 'Стоимость' }), price]),
+      el('div', { className: 'field' }, [el('label', { text: 'Срок' }), duration]),
+    ]),
+    el('div', { className: 'field' }, [
+      el('label', { text: 'Характеристики' }),
+      detailsBox,
+    ]),
+    el('div', { className: 'field' }, [
+      el('label', { text: `Фото (до ${MAX_NEWS_PHOTOS})` }),
+      file,
+      preview,
+    ]),
+    el('div', { className: 'field' }, [el('label', { text: 'Видео' }), videoUrl]),
+    el('div', { className: 'field' }, [el('label', { text: 'Контакты' }), contact]),
+    el('label', { className: 'news-compose-check' }, [
+      pinned,
+      el('span', { text: 'Закрепить сверху' }),
+    ]),
+    el('div', { className: 'news-compose-actions' }, [submit, cancel]),
+  ])
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const t = title.value.trim()
+    if (!t) {
+      showToast('Нужен заголовок', true)
+      return
+    }
+    submit.disabled = true
+    submit.textContent = 'Сохраняю…'
+    try {
+      await saveProgram({
+        id: draft.id,
+        kind,
+        groupId: draft.groupId || null,
+        title: t,
+        subtitle: subtitle.value.trim(),
+        body: body.value.trim(),
+        attachments: draft.attachments,
+        details: draft.details,
+        price: price.value.trim(),
+        duration: duration.value.trim(),
+        contact: contact.value.trim(),
+        videoUrl: videoUrl.value.trim(),
+        pinned: pinned.checked,
+      })
+      state.programDraft = null
+      programsLoaded.delete(kind)
+      showToast(draft.id ? 'Сохранено' : 'Опубликовано')
+      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+    } catch (err) {
+      submit.disabled = false
+      submit.textContent = draft.id ? 'Сохранить' : 'Опубликовать'
+      showToast(err.message, true)
+    }
+  })
+
+  card.append(form)
+  return card
+}
+
+/** Обращение в техподдержку — короткий экран вместо карточки в самом низу профиля. */
+function renderMoreSupport() {
+  const session = getSession()
+  const panel = el('div', { className: 'panel' }, [
+    el('button', {
+      type: 'button',
+      className: 'btn secondary',
+      text: '← Профиль',
+      onClick: () => {
+        state.moreScreen = ''
+        render({ force: true })
+      },
+    }),
+  ])
+
+  panel.append(
+    el('div', { className: 'card support-hero' }, [
+      el('h2', { className: 'support-hero-title', text: 'Техподдержка' }),
+      el('p', {
+        className: 'muted',
+        style: 'margin:0',
+        text: 'Что-то не работает, криво показывается или есть идея — напиши нам в Telegram. Ответим туда же, обычно в тот же день.',
+      }),
+      el('a', {
+        className: 'btn support-hero-btn',
+        href: 'https://t.me/rasphelp_bot',
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        text: 'Написать в Telegram',
+      }),
+    ]),
+    el('div', { className: 'card' }, [
+      el('h3', { text: 'Чтобы решили быстрее' }),
+      el('ol', { className: 'support-steps' }, [
+        el('li', { text: 'Что именно делал — открыл журнал, нажал «сохранить»…' }),
+        el('li', { text: 'Что ожидал увидеть и что увидел на самом деле.' }),
+        el('li', { text: 'Модель телефона и браузер: Chrome, Safari.' }),
+        el('li', { text: 'Скриншот — если проблема на экране.' }),
+      ]),
+    ]),
+  )
+
+  if (session?.role === 'admin') {
+    panel.append(
+      el('div', { className: 'card' }, [
+        el('p', {
+          className: 'muted',
+          style: 'margin:0',
+          text: 'Обращения студентов приходят в Telegram-бот, а очередь видна в админке → «Обращения».',
+        }),
+      ]),
+    )
+  } else {
+    panel.append(
+      el('div', { className: 'card' }, [
+        el('h3', { text: 'Частые вопросы' }),
+        el('div', { className: 'support-faq' }, [
+          el('p', { className: 'support-faq-q', text: 'Не вижу оценки' }),
+          el('p', {
+            className: 'support-faq-a',
+            text: 'Оценки ставит староста или куратор. Если пары не было в журнале — их просто не завели.',
+          }),
+          el('p', { className: 'support-faq-q', text: 'Не пускает по коду' }),
+          el('p', {
+            className: 'support-faq-a',
+            text: 'Код выдаёт староста. Если код потерян — попроси новый: старый перестанет работать.',
+          }),
+          el('p', { className: 'support-faq-q', text: 'Расписание не то' }),
+          el('p', {
+            className: 'support-faq-a',
+            text: 'Проверь группу сверху экрана: свайп по расписанию работает только внутри выбранной группы.',
+          }),
+        ]),
+      ]),
+    )
+  }
+
+  return panel
+}
+
 /**
  * Главная: карусель событий с фото, что сейчас/дальше, ДЗ на сегодня,
  * лента и быстрые переходы. Всё из уже загруженного состояния.
@@ -6788,7 +7967,7 @@ function renderHome() {
     )
   }
 
-  // —— Быстрые переходы: таб + необязательная подготовка состояния
+  // —— Быстрые переходы: таб + необязательный подэкран профиля
   const tiles = [
     { tab: 'schedule', title: 'Расписание', sub: 'Все пары на неделю' },
     { tab: 'grades', title: 'Журнал', sub: 'Оценки и посещаемость', before: () => (state.studyMode = 'grades') },
@@ -6803,7 +7982,11 @@ function renderHome() {
       },
     },
     { tab: 'teachers', title: 'Справочник', sub: 'Препод или кабинет' },
-    { tab: 'more', title: 'Моя группа', sub: 'Одногруппники и контакты', before: () => (state.moreScreen = 'group') },
+    { tab: 'more', more: 'group', title: 'Моя группа', sub: 'Одногруппники и контакты' },
+    { tab: 'more', more: 'overrides', title: 'Замены', sub: 'Отмены и переносы' },
+    { tab: 'more', more: 'dpo', title: 'Доп. образование', sub: 'Программы и набор' },
+    { tab: 'more', more: 'clubs', title: 'Кружки и секции', sub: 'Куда записаться' },
+    { tab: 'more', more: 'support', title: 'Техподдержка', sub: 'Написать в поддержку' },
   ]
   wrap.append(
     el(
@@ -6816,6 +7999,10 @@ function renderHome() {
           onClick: () => {
             hapticTap()
             if (t.before) t.before()
+            if (t.more) {
+              openMoreScreen(t.more)
+              return
+            }
             gotoTab(t.tab, { animate: true })
           },
         }, [
@@ -8216,6 +9403,25 @@ function gotoTab(tabId, { animate = true } = {}) {
   refreshTabPanes([tabId], { force })
 }
 
+/**
+ * Открыть конкретный подэкран профиля (замены, моя группа, допобразование…).
+ * switchTab('more') всегда сбрасывает подэкран в корень профиля, поэтому
+ * состояние выставляем после переключения и сразу перерисовываем панель.
+ */
+function openMoreScreen(screen, { animate = true } = {}) {
+  if (!screen) return
+  if (state.tab === 'more') {
+    state.moreScreen = screen
+    if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+    softUpdateNav()
+    return
+  }
+  switchTab('more', { animate })
+  state.moreScreen = screen
+  if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+  softUpdateNav()
+}
+
 const swipe = {
   x0: 0,
   y0: 0,
@@ -9091,7 +10297,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=140`, { scope: base })
+    .register(`${base}sw.js?v=141`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
