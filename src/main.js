@@ -5608,10 +5608,22 @@ function renderMore() {
   if (state.moreScreen === 'group') return renderMoreGroup()
   if (state.moreScreen === 'contacts') return renderMoreContacts()
   if (state.moreScreen === 'mycode') return renderMoreMyCode()
-  if (state.moreScreen === 'dpo') return renderPrograms('dpo')
-  if (state.moreScreen === 'clubs') return renderPrograms('club')
   if (state.moreScreen === 'support') return renderMoreSupport()
+  // Доп. образование и кружки живут только на главной — см. renderHome().
   return MORE_UI_V2 ? renderMoreV2() : renderMoreClassic()
+}
+
+/** Раздел главной, который открывается вместо ленты: '' | 'dpo' | 'clubs'. */
+function homeProgramKind() {
+  if (state.moreScreen === 'dpo') return 'dpo'
+  if (state.moreScreen === 'clubs') return 'club'
+  return ''
+}
+
+/** Открыть доп. образование / кружки на главной (а не в профиле). */
+function openProgramScreen(kind) {
+  state.moreScreen = kind === 'club' ? 'clubs' : 'dpo'
+  gotoTab('home', { animate: true })
 }
 
 /**
@@ -7030,22 +7042,24 @@ function emptyProgramDraft(kind) {
   }
 }
 
-function renderPrograms(kind) {
+function renderPrograms(kind, { standalone = false } = {}) {
   const cfg = PROGRAM_KINDS[kind] || PROGRAM_KINDS.dpo
   const groupId = state.groupId || null
   const canManage = canManagePrograms()
 
   const panel = el('div', { className: 'panel program-panel' }, [
-    el('button', {
-      type: 'button',
-      className: 'btn secondary',
-      text: '← Главная',
-      onClick: () => {
-        state.moreScreen = ''
-        state.programDraft = null
-        gotoTab('home', { animate: true })
-      },
-    }),
+    standalone
+      ? el('button', {
+          type: 'button',
+          className: 'btn secondary',
+          text: '← Главная',
+          onClick: () => {
+            state.moreScreen = ''
+            state.programDraft = null
+            if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
+          },
+        })
+      : null,
     el('div', { className: 'program-head' }, [
       el('div', { className: 'program-head-text' }, [
         el('h2', { className: 'program-head-title', text: cfg.title }),
@@ -7060,7 +7074,7 @@ function renderPrograms(kind) {
             onClick: () => {
               hapticTap()
               state.programDraft = emptyProgramDraft(kind)
-              if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+              if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
             },
           })
         : null,
@@ -7445,7 +7459,7 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
       list = fresh
       showToast(dir < 0 ? 'Подняли выше' : 'Опустили ниже')
       paint()
-      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+      if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
     } catch (err) {
       showToast(err.message, true)
     }
@@ -7471,7 +7485,7 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
       pinned: item.pinned,
     }
     close()
-    if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+    if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
   }
 
   const removeItem = async () => {
@@ -7482,7 +7496,7 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
       await deleteProgram(item.id)
       showToast('Удалено')
       close()
-      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+      if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
     } catch (err) {
       showToast(err.message, true)
     }
@@ -7795,7 +7809,7 @@ function renderProgramEditor(kind) {
     text: 'Отмена',
     onClick: () => {
       state.programDraft = null
-      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+      if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
     },
   })
 
@@ -7868,7 +7882,7 @@ function renderProgramEditor(kind) {
       state.programDraft = null
       programsLoaded.delete(kind)
       showToast(draft.id ? 'Сохранено' : 'Опубликовано')
-      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
+      if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
     } catch (err) {
       submit.disabled = false
       submit.textContent = draft.id ? 'Сохранить' : 'Опубликовать'
@@ -8028,6 +8042,9 @@ function renderMoreSupport() {
  */
 function renderHome() {
   const group = state.groupId ? getGroup(state.groupId) : null
+  // Доп. образование и кружки — разделы главной, а не профиля: открываем их здесь.
+  const programKind = homeProgramKind()
+  if (programKind) return renderPrograms(programKind, { standalone: true })
   const wrap = el('div', { className: 'panel home-panel' })
 
   // —— Верхняя строка: колледж, семестр, группа. Раньше жила поверх фото фасада.
@@ -8120,8 +8137,8 @@ function renderHome() {
     { tab: 'teachers', title: 'Справочник', sub: 'Препод или кабинет' },
     { tab: 'more', more: 'group', title: 'Моя группа', sub: 'Одногруппники и контакты' },
     { tab: 'more', more: 'overrides', title: 'Замены', sub: 'Отмены и переносы' },
-    { tab: 'more', more: 'dpo', title: 'Доп. образование', sub: 'Программы и набор' },
-    { tab: 'more', more: 'clubs', title: 'Кружки и секции', sub: 'Куда записаться' },
+    { programs: 'dpo', title: 'Доп. образование', sub: 'Программы и набор' },
+    { programs: 'club', title: 'Кружки и секции', sub: 'Куда записаться' },
     { tab: 'more', more: 'support', title: 'Техподдержка', sub: 'Написать в поддержку' },
   ]
   wrap.append(
@@ -8135,6 +8152,10 @@ function renderHome() {
           onClick: () => {
             hapticTap()
             if (t.before) t.before()
+            if (t.programs) {
+              openProgramScreen(t.programs)
+              return
+            }
             if (t.more) {
               openMoreScreen(t.more)
               return
@@ -9599,6 +9620,14 @@ function switchTab(id, { animate = false, fromDrag = false } = {}) {
       softUpdateNav()
       return
     }
+    // Уже на главной, но открыт раздел допобразования — вернуть ленту
+    if (id === 'home' && homeProgramKind()) {
+      state.moreScreen = ''
+      state.programDraft = null
+      if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
+      softUpdateNav()
+      return
+    }
     if (fromDrag) softUpdateNav()
     return
   }
@@ -9622,6 +9651,8 @@ function switchTab(id, { animate = false, fromDrag = false } = {}) {
   // Панель при этом надо обновить, иначе останется отрисованный подэкран замен.
   const leavingProfileScreen = id === 'more' && state.moreScreen !== ''
   if (id === 'more') state.moreScreen = ''
+  // Ушли с главной — раздел допобразования закрываем, иначе вернёмся в список, а не в ленту.
+  else if (id !== 'home' && homeProgramKind()) state.moreScreen = ''
   state.tab = id
   state.cascade = false
   const i = pagerIndex(id)
@@ -10585,7 +10616,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=144`, { scope: base })
+    .register(`${base}sw.js?v=145`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
