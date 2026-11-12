@@ -74,6 +74,7 @@ import {
   addNews,
   deleteNews,
   moveNews,
+  updateNews,
   getPrograms,
   refreshPrograms,
   saveProgram,
@@ -202,6 +203,8 @@ const state = {
   newsCompose: false,
   /** Черновик новости между перерисовками: { title, body, pinned, attachments } */
   newsDraft: null,
+  /** Событие, которое сейчас правим (или null — создаём новое). */
+  newsEdit: null,
   /** Черновик программы в редакторе или null, если редактор закрыт */
   programDraft: null,
   message: null,
@@ -7182,7 +7185,7 @@ function renderPrograms(kind, { standalone = false } = {}) {
   return panel
 }
 
-/** Полноэкранный просмотр программы: как у событий, только с таблицей и видео. */
+/** Полноэкранный просмотр программы: лента карточек, как у событий. */
 function openProgramReader(items, startIndex = 0, kind = 'dpo') {
   if (!items?.length) return
   let list = items
@@ -7190,15 +7193,10 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
   closeHwLightbox({ animate: false })
   document.querySelectorAll('.news-reader').forEach((n) => n.remove())
 
-  const overlay = el('div', {
-    className: 'news-reader program-reader',
-    role: 'dialog',
-    'aria-modal': 'true',
-    'aria-label': PROGRAM_KINDS[kind]?.title || 'Программа',
-  })
-  const page = el('div', { className: 'news-reader-page' })
-
+  const { overlay, viewport, track } = createReaderShell(PROGRAM_KINDS[kind]?.title || 'Программа')
+  overlay.classList.add('program-reader')
   let closing = false
+
   const close = () => {
     if (closing) return
     closing = true
@@ -7208,8 +7206,8 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
     window.setTimeout(() => overlay.remove(), 260)
   }
 
-  const paint = () => {
-    const item = list[index] || {}
+  /** Одна карточка программы: обложка, факты, видео, описание, характеристики. */
+  const buildCard = (item, i) => {
     const images = programImages(item)
     const cover = images[0]
     const canEditProgram = canManagePrograms()
@@ -7253,9 +7251,7 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
           el('span', { className: 'program-reader-kind', text: place }),
         ]),
         el('h1', { className: 'news-reader-title', text: item.title }),
-        item.subtitle
-          ? el('p', { className: 'program-reader-sub', text: item.subtitle })
-          : null,
+        item.subtitle ? el('p', { className: 'program-reader-sub', text: item.subtitle }) : null,
         el('p', { className: 'news-reader-date' }, [
           item.duration ? el('span', { text: item.duration }) : null,
           item.duration && item.price ? el('span', { className: 'news-reader-dot-sep', text: '·' }) : null,
@@ -7284,21 +7280,17 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
       : null
 
     const details = (item.details || []).length
-      ? el(
-          'div',
-          { className: 'program-details' },
-          [
-            el('h2', { className: 'program-section-title', text: 'Что важно знать' }),
-            el(
-              'dl',
-              { className: 'program-details-list' },
-              (item.details || []).flatMap((d) => [
-                el('dt', { text: d.label || '' }),
-                el('dd', { text: d.value || '' }),
-              ]),
-            ),
-          ],
-        )
+      ? el('div', { className: 'program-details' }, [
+          el('h2', { className: 'program-section-title', text: 'Что важно знать' }),
+          el(
+            'dl',
+            { className: 'program-details-list' },
+            (item.details || []).flatMap((d) => [
+              el('dt', { text: d.label || '' }),
+              el('dd', { text: d.value || '' }),
+            ]),
+          ),
+        ])
       : null
 
     const videoBox = video
@@ -7332,7 +7324,7 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
         ? el(
             'div',
             { className: 'news-reader-extra' },
-            extra.map((a, i) =>
+            extra.map((a, k) =>
               el('img', {
                 className: 'news-reader-extra-photo',
                 src: a.url,
@@ -7342,7 +7334,7 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
                 referrerpolicy: 'no-referrer',
                 onClick: () => {
                   hapticTap()
-                  openHwLightbox(images.map((x) => x.url), i + 1)
+                  openHwLightbox(images.map((x) => x.url), k + 1)
                 },
               }),
             ),
@@ -7351,10 +7343,41 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
       contact,
       list.length > 1
         ? el('div', { className: 'news-reader-foot' }, [
-            el('span', { className: 'news-reader-foot-count', text: `${index + 1} из ${list.length}` }),
+            el('span', { className: 'news-reader-foot-count', text: `${i + 1} из ${list.length}` }),
           ])
         : null,
     ])
+
+    const toolbar = canEditProgram
+      ? el('div', { className: 'news-reader-toolbar' }, [
+          el('button', {
+            type: 'button',
+            className: 'news-reader-tool is-up',
+            text: 'Выше',
+            title: 'Показывать раньше',
+            onClick: () => move(i, -1),
+          }),
+          el('button', {
+            type: 'button',
+            className: 'news-reader-tool is-down',
+            text: 'Ниже',
+            title: 'Показывать позже',
+            onClick: () => move(i, 1),
+          }),
+          el('button', {
+            type: 'button',
+            className: 'news-reader-tool',
+            text: 'Изменить',
+            onClick: () => edit(i),
+          }),
+          el('button', {
+            type: 'button',
+            className: 'news-reader-tool is-del',
+            text: 'Удалить',
+            onClick: () => removeItem(i),
+          }),
+        ])
+      : null
 
     const pager =
       list.length > 1
@@ -7364,23 +7387,18 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
               className: 'news-reader-pager-btn',
               text: '‹',
               'aria-label': 'Предыдущая программа',
-              disabled: index === 0,
+              disabled: i === 0,
               onClick: () => step(-1),
             }),
             el(
               'div',
               { className: 'news-reader-pager-dots' },
-              list.map((n, i) =>
+              list.map((n, k) =>
                 el('button', {
                   type: 'button',
-                  className: i === index ? 'news-reader-pager-dot is-on' : 'news-reader-pager-dot',
-                  'aria-label': `Программа ${i + 1}`,
-                  onClick: () => {
-                    if (i === index) return
-                    index = i
-                    paint()
-                    page.scrollTop = 0
-                  },
+                  className: k === index ? 'news-reader-pager-dot is-on' : 'news-reader-pager-dot',
+                  'aria-label': `Программа ${k + 1}`,
+                  onClick: () => goTo(k),
                 }),
               ),
             ),
@@ -7389,84 +7407,57 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
               className: 'news-reader-pager-btn',
               text: '›',
               'aria-label': 'Следующая программа',
-              disabled: index >= list.length - 1,
+              disabled: i >= list.length - 1,
               onClick: () => step(1),
             }),
           ])
         : null
 
-    page.replaceChildren(
-      hero,
-      body,
-      el('div', { className: 'news-reader-toolbar' }, [
-        canEditProgram
-          ? el('button', {
-              type: 'button',
-              className: 'news-reader-tool is-up',
-              text: 'Выше',
-              title: 'Показывать раньше',
-              onClick: () => move(-1),
-            })
-          : null,
-        canEditProgram
-          ? el('button', {
-              type: 'button',
-              className: 'news-reader-tool is-down',
-              text: 'Ниже',
-              title: 'Показывать позже',
-              onClick: () => move(1),
-            })
-          : null,
-        canEditProgram
-          ? el('button', {
-              type: 'button',
-              className: 'news-reader-tool',
-              text: 'Изменить',
-              onClick: () => edit(),
-            })
-          : null,
-        canEditProgram
-          ? el('button', {
-              type: 'button',
-              className: 'news-reader-tool is-del',
-              text: 'Удалить',
-              onClick: () => removeItem(),
-            })
-          : null,
-      ]),
-      pager,
-    )
+    return el('article', { className: 'news-reader-card' }, [hero, body, toolbar, pager])
   }
 
-  const step = (delta) => {
-    const next = index + delta
-    if (next < 0 || next >= list.length) return
-    hapticTap()
+  const repaint = () => {
+    const cards = list.map((n, i) => buildCard(n, i))
+    mountReaderCards(track, cards, index)
+    paintDots()
+  }
+
+  const paintDots = () => {
+    const dots = track.children[index]?.querySelectorAll('.news-reader-pager-dot')
+    if (dots?.length) [...dots].forEach((d, k) => d.classList.toggle('is-on', k === index))
+  }
+
+  const goTo = (i) => {
+    const next = Math.max(0, Math.min(list.length - 1, i))
+    if (next === index) return
     index = next
-    paint()
-    page.scrollTo({ top: 0, behavior: 'smooth' })
+    scrollReaderTo(track, next)
+    paintDots()
+    hapticTap()
   }
 
-  const move = async (dir) => {
-    const item = list[index]
+  const step = (delta) => goTo(index + delta)
+
+  const move = async (i, dir) => {
+    const item = list[i]
     if (!item) return
     hapticTap()
     try {
       await moveProgram(item.id, dir, kind, state.groupId)
       const fresh = getPrograms(kind, state.groupId)
       const at = fresh.findIndex((p) => p.id === item.id)
-      index = at < 0 ? 0 : at
       list = fresh
+      index = at < 0 ? 0 : at
       showToast(dir < 0 ? 'Подняли выше' : 'Опустили ниже')
-      paint()
+      repaint()
       if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
     } catch (err) {
       showToast(err.message, true)
     }
   }
 
-  const edit = () => {
-    const item = list[index]
+  const edit = (i) => {
+    const item = list[i]
     if (!item) return
     hapticTap()
     state.programDraft = {
@@ -7488,8 +7479,8 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
     if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
   }
 
-  const removeItem = async () => {
-    const item = list[index]
+  const removeItem = async (i) => {
+    const item = list[i]
     if (!item) return
     if (!confirm(`Удалить «${item.title}»?`)) return
     try {
@@ -7502,7 +7493,7 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
     }
   }
 
-  paint()
+  repaint()
 
   overlay.append(
     el('button', {
@@ -7512,20 +7503,18 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
       'aria-label': 'Закрыть',
       onClick: close,
     }),
-    page,
+    viewport,
   )
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) close()
   })
 
-  attachReaderSwipe({
-    page,
+  attachCardSwipe({
+    viewport,
+    track,
     count: () => list.length,
     index: () => index,
-    onStep: (dir) => {
-      index += dir
-      paint()
-    },
+    goTo,
     onClose: close,
   })
 
@@ -7536,6 +7525,12 @@ function openProgramReader(items, startIndex = 0, kind = 'dpo') {
   }
   document.addEventListener('keydown', onKey)
   overlay.addEventListener('remove', () => document.removeEventListener('keydown', onKey))
+
+  const onResize = () => {
+    if (document.body.contains(overlay)) scrollReaderTo(track, index, false)
+  }
+  window.addEventListener('resize', onResize, { passive: true })
+  overlay.addEventListener('remove', () => window.removeEventListener('resize', onResize))
 
   document.body.append(overlay)
   lockReaderScroll()
@@ -7659,10 +7654,10 @@ function renderProgramEditor(kind) {
   }
   paintDetails()
 
-  // —— Фото
+  // —— Фото и видео
   const file = el('input', {
     type: 'file',
-    accept: 'image/jpeg,image/png,image/webp,image/gif',
+    accept: 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime',
     multiple: true,
   })
   // Обложка: отдельный выбор с кадрированием в квадрат — как фото профиля.
@@ -7681,27 +7676,40 @@ function renderProgramEditor(kind) {
   const paintPreview = () => {
     preview.replaceChildren()
     coverBtn.textContent = draft.attachments.length ? 'Сменить обложку' : 'Добавить обложку'
+    const hasVideo = draft.attachments.some((a) => splitNewsMedia([a]).videos.length)
     if (!draft.attachments.length) {
-      preview.append(el('p', { className: 'muted', text: 'Фото не выбрано' }))
+      preview.append(el('p', { className: 'muted', text: 'Фото и видео не выбраны' }))
       return
     }
     draft.attachments.forEach((a, i) => {
+      const isVideo = splitNewsMedia([a]).videos.length > 0
+      const photoIndex = isVideo ? -1 : splitNewsMedia(draft.attachments.slice(0, i + 1)).photos.length - 1
       preview.append(
-        el('div', { className: `news-compose-thumb${i === 0 ? ' is-cover' : ''}` }, [
-          el('img', { src: a.url, alt: a.name || '', loading: 'lazy', decoding: 'async' }),
-          i === 0
+        el('div', { className: `news-compose-thumb${isVideo ? ' is-video' : ''}` }, [
+          isVideo
+            ? el('video', {
+                className: 'news-compose-thumb-video',
+                src: a.url,
+                muted: true,
+                playsinline: true,
+                preload: 'metadata',
+              })
+            : el('img', { src: a.url, alt: a.name || '', loading: 'lazy', decoding: 'async' }),
+          !isVideo && photoIndex === 0
             ? el('span', { className: 'news-compose-thumb-badge', text: 'Обложка' })
-            : el('button', {
-                type: 'button',
-                className: 'news-compose-thumb-cover',
-                text: 'Обложка',
-                title: 'Сделать обложкой',
-                onClick: () => {
-                  const [picked] = draft.attachments.splice(i, 1)
-                  draft.attachments.unshift(picked)
-                  paintPreview()
-                },
-              }),
+            : !isVideo
+              ? el('button', {
+                  type: 'button',
+                  className: 'news-compose-thumb-cover',
+                  text: 'Обложка',
+                  title: 'Сделать обложкой',
+                  onClick: () => {
+                    const [picked] = draft.attachments.splice(i, 1)
+                    draft.attachments.unshift(picked)
+                    paintPreview()
+                  },
+                })
+              : null,
           el('button', {
             type: 'button',
             className: 'news-compose-thumb-x',
@@ -7715,6 +7723,15 @@ function renderProgramEditor(kind) {
         ]),
       )
     })
+    if (hasVideo) {
+      preview.append(
+        el('p', {
+          className: 'muted',
+          style: 'font-size:11.5px;flex-basis:100%',
+          text: 'Видео появится в просмотре под описанием.',
+        }),
+      )
+    }
   }
   paintPreview()
 
@@ -7753,13 +7770,14 @@ function renderProgramEditor(kind) {
     if (!file.files?.length) return
     const room = MAX_NEWS_PHOTOS - draft.attachments.length
     if (room <= 0) {
-      showToast(`Максимум ${MAX_NEWS_PHOTOS} фото`, true)
+      showToast(`Максимум ${MAX_NEWS_PHOTOS} файлов`, true)
       file.value = ''
       return
     }
     try {
       const picked = [...file.files].slice(0, Math.min(room, 4))
-      showToast('Загружаю фото…')
+      const hasVideo = picked.some((f) => /^video\//i.test(f.type || ''))
+      showToast(hasVideo ? 'Загружаю видео… это может занять время' : 'Загружаю фото…')
       const uploaded = await uploadHomeworkFiles(state.groupId, picked)
       draft.attachments.push(...uploaded)
       paintPreview()
@@ -7842,10 +7860,13 @@ function renderProgramEditor(kind) {
       preview,
     ]),
     el('div', { className: 'field' }, [
-      el('label', { text: `Добавить ещё фото (до ${MAX_NEWS_PHOTOS})` }),
+      el('label', { text: `Добавить ещё фото или видео (до ${MAX_NEWS_PHOTOS})` }),
       file,
     ]),
-    el('div', { className: 'field' }, [el('label', { text: 'Видео' }), videoUrl]),
+    el('div', { className: 'field' }, [
+      el('label', { text: 'Видео по ссылке (необязательно)' }),
+      videoUrl,
+    ]),
     el('div', { className: 'field' }, [el('label', { text: 'Контакты' }), contact]),
     el('label', { className: 'news-compose-check' }, [
       pinned,
@@ -8215,18 +8236,46 @@ function formatNewsDate(iso) {
   return d.getFullYear() === today.getFullYear() ? date : `${date} ${d.getFullYear()}`
 }
 
-/**
- * Плавное листание в полноэкранном просмотре.
- * Страница едет за пальцем один-в-один, у краёв — сопротивление,
- * на отпускании выезжает и въезжает следующая (без рывка и без «прыжка»).
- * Вертикально — обычная прокрутка; потянуть вниз с самого верха — закрыть.
- */
-function attachReaderSwipe({ page, count, index, onStep, onClose }) {
-  const OUT_MS = 190
-  const IN_MS = 250
-  const EASE_OUT = 'cubic-bezier(0.32, 0.72, 0, 1)'
-  const EASE_IN = 'cubic-bezier(0.22, 0.61, 0.36, 1)'
+/** Плавность бокового листания: одна кривая на все читалки. */
+const READER_EASE = 'cubic-bezier(0.22, 0.61, 0.36, 1)'
+const READER_SNAP_MS = 300
 
+/**
+ * Каркас полноэкранного просмотра: карточки лежат в ряд, каждая со своей
+ * прокруткой. Соседняя карточка нарисована заранее и стоит рядом — поэтому
+ * при свайпе она видна сразу, без белой вспышки и без перерисовки на ходу.
+ */
+function createReaderShell(label) {
+  const overlay = el('div', {
+    className: 'news-reader',
+    role: 'dialog',
+    'aria-modal': 'true',
+    'aria-label': label || 'Просмотр',
+  })
+  const viewport = el('div', { className: 'news-reader-viewport' })
+  const track = el('div', { className: 'news-reader-track' })
+  viewport.append(track)
+  return { overlay, viewport, track }
+}
+
+/** Поставить карточки в ряд и выровнять ленту на нужную. */
+function mountReaderCards(track, cards, activeIndex) {
+  track.replaceChildren(...cards)
+  track.style.transition = 'none'
+  track.style.transform = `translate3d(${-activeIndex * 100}%,0,0)`
+}
+
+/** Проехать лентой к карточке. animate=false — мгновенно (старт, сброс размера). */
+function scrollReaderTo(track, i, animate = true) {
+  track.style.transition = animate ? `transform ${READER_SNAP_MS}ms ${READER_EASE}` : 'none'
+  track.style.transform = `translate3d(${-i * 100}%,0,0)`
+}
+
+/**
+ * Свайп по ленте карточек: тянется 1:1 за пальцем, соседняя карточка видна
+ * сразу. Вертикаль — обычная прокрутка карточки; вниз с самого верха — закрыть.
+ */
+function attachCardSwipe({ viewport, track, count, index, goTo, onClose }) {
   let sx = null
   let sy = null
   let axis = null
@@ -8234,60 +8283,36 @@ function attachReaderSwipe({ page, count, index, onStep, onClose }) {
   let moved = 0
   let busy = false
   let startAt = 0
-  let width = 0
+  let w = 0
   let pulled = 0
 
-  const setT = (transform, opacity, ms, ease) => {
-    page.style.transition = ms ? `transform ${ms}ms ${ease}, opacity ${ms}ms ${ease}` : 'none'
-    page.style.transform = transform
-    page.style.opacity = opacity
-  }
+  const activeSlide = () => track.children[index()]
 
-  const settle = () => {
-    setT('translate3d(0,0,0)', '1', IN_MS, EASE_IN)
-    busy = true
-    window.setTimeout(() => {
-      page.style.transition = ''
-      page.style.transform = ''
-      page.style.opacity = ''
-      busy = false
-    }, IN_MS)
-  }
-
-  const slide = (dir) => {
-    const w = width || page.clientWidth || window.innerWidth
-    busy = true
-    // Уезжаем в сторону жеста, затем появляемся с противоположной стороны с новым текстом.
-    setT(`translate3d(${-dir * w * 0.35}px,0,0)`, '0', OUT_MS, EASE_OUT)
-    window.setTimeout(() => {
-      onStep(dir)
-      page.scrollTop = 0
-      setT(`translate3d(${dir * w * 0.6}px,0,0)`, '0', 0, EASE_OUT)
-      // Форсируем reflow, чтобы въезд точно проигрался.
-      void page.offsetWidth
-      setT('translate3d(0,0,0)', '1', IN_MS, EASE_IN)
-      window.setTimeout(() => {
-        page.style.transition = ''
-        page.style.transform = ''
-        page.style.opacity = ''
-        busy = false
-      }, IN_MS)
-    }, OUT_MS)
+  const snap = (animate) => {
+    track.style.transition = animate ? `transform ${READER_SNAP_MS}ms ${READER_EASE}` : 'none'
+    track.style.transform = `translate3d(${-index() * 100}%,0,0)`
   }
 
   const begin = (e) => {
     if (busy) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     const t = e.target
-    // Кнопки, ссылки и видео не перехватываем — иначе не нажать.
-    if (t instanceof Element && t.closest('button, a, video, input, .news-reader-pager, .news-reader-toolbar')) return
+    // Кнопки, ссылки, видео и поля не перехватываем — иначе не нажать.
+    if (
+      t instanceof Element &&
+      t.closest('button, a, video, audio, input, textarea, .news-reader-pager, .news-reader-toolbar')
+    ) {
+      return
+    }
     sx = e.clientX
     sy = e.clientY
     dx = 0
     moved = 0
     pulled = 0
     axis = null
-    width = page.clientWidth || window.innerWidth
+    viewport.style.transition = 'none'
+    viewport.style.transform = ''
+    w = viewport.clientWidth || window.innerWidth
     startAt = Date.now()
   }
 
@@ -8298,43 +8323,44 @@ function attachReaderSwipe({ page, count, index, onStep, onClose }) {
     if (!axis) {
       if (Math.abs(ddx) < 6 && Math.abs(ddy) < 6) return
       axis = Math.abs(ddx) > Math.abs(ddy) * 1.15 ? 'x' : 'y'
-      if (axis === 'x' && page.setPointerCapture) {
+      if (axis === 'x') {
         try {
-          page.setPointerCapture(e.pointerId)
+          viewport.setPointerCapture(e.pointerId)
         } catch {
           /* ignore */
         }
       }
     }
     if (axis === 'y') {
-      // Вниз с самого верха — жест «закрыть», страница чуть подаётся.
-      if (ddy > 0 && page.scrollTop <= 0) {
+      const slide = activeSlide()
+      if (ddy > 0 && (!slide || slide.scrollTop <= 0)) {
         pulled = ddy
-        page.style.transition = 'none'
-        page.style.transform = `translate3d(0,${Math.min(ddy * 0.5, 90)}px,0)`
+        viewport.style.transition = 'none'
+        viewport.style.transform = `translate3d(0,${Math.min(ddy * 0.5, 90)}px,0)`
       } else if (pulled) {
         pulled = 0
-        page.style.transition = 'none'
-        page.style.transform = ''
+        viewport.style.transition = 'none'
+        viewport.style.transform = ''
       }
       return
     }
     dx = ddx
     moved = Math.max(moved, Math.abs(ddx))
-    const max = count() - 1
     const cur = index()
-    const atEdge = (ddx > 0 && cur <= 0) || (ddx < 0 && cur >= max)
-    const shift = atEdge ? ddx * 0.22 : ddx
-    setT(`translate3d(${shift}px,0,0)`, '', 0, EASE_OUT)
+    if (count() < 2) return
+    const atEdge = (ddx > 0 && cur <= 0) || (ddx < 0 && cur >= count() - 1)
+    // У края лента чуть подаётся — видно, что дальше ничего нет.
+    track.style.transition = 'none'
+    track.style.transform = `translate3d(calc(${-cur * 100}% + ${atEdge ? ddx * 0.18 : ddx}px),0,0)`
   }
 
-  const end = (e) => {
+  const end = () => {
     if (sx == null) return
     const wasAxis = axis
     const total = dx
     const elapsed = Math.max(1, Date.now() - startAt)
     const velocity = total / elapsed
-    const w = width || page.clientWidth || window.innerWidth
+    const width = w || viewport.clientWidth || window.innerWidth
     sx = null
     sy = null
     axis = null
@@ -8346,32 +8372,35 @@ function attachReaderSwipe({ page, count, index, onStep, onClose }) {
         onClose()
         return
       }
-      page.style.transition = 'transform 180ms ' + EASE_IN
-      page.style.transform = ''
+      viewport.style.transition = `transform 200ms ${READER_EASE}`
+      viewport.style.transform = ''
       return
     }
 
-    const max = count() - 1
     const cur = index()
-    const far = Math.abs(total) > w * 0.16
-    const fast = Math.abs(velocity) > 0.35 && moved > 24
     const dir = total < 0 ? 1 : -1
-    const canGo = dir === 1 ? cur < max : cur > 0
+    const far = Math.abs(total) > width * 0.2
+    const fast = Math.abs(velocity) > 0.3 && moved > 20
+    const canGo = dir === 1 ? cur < count() - 1 : cur > 0
 
     if (canGo && (far || fast)) {
-      slide(dir)
+      busy = true
+      goTo(cur + dir)
+      window.setTimeout(() => {
+        busy = false
+      }, READER_SNAP_MS + 40)
       return
     }
     // Не дотянули — плавно возвращаемся на место.
-    settle()
+    snap(true)
   }
 
-  page.addEventListener('pointerdown', begin)
-  page.addEventListener('pointermove', move)
-  page.addEventListener('pointerup', end)
-  page.addEventListener('pointercancel', end)
-  // После свайпа не даём «дожать» тап по фото.
-  page.addEventListener(
+  viewport.addEventListener('pointerdown', begin)
+  viewport.addEventListener('pointermove', move)
+  viewport.addEventListener('pointerup', end)
+  viewport.addEventListener('pointercancel', end)
+  // После свайпа не даём «дожать» тап по фото или кнопке.
+  viewport.addEventListener(
     'click',
     (e) => {
       if (moved > 10) {
@@ -8382,6 +8411,19 @@ function attachReaderSwipe({ page, count, index, onStep, onClose }) {
     },
     true,
   )
+}
+
+/** Фото и видео из вложений: у видео в ленте свой плеер. */
+function splitNewsMedia(attachments) {
+  const photos = []
+  const videos = []
+  for (const a of attachments || []) {
+    const url = a?.url || ''
+    const mime = String(a?.mime || '')
+    if (/^video\//i.test(mime) || /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(url)) videos.push(a)
+    else if (/^image\//i.test(mime) || /\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i.test(url)) photos.push(a)
+  }
+  return { photos, videos }
 }
 
 /**
@@ -8401,26 +8443,20 @@ function unlockReaderScroll() {
 }
 
 /**
- * Просмотр события: полноэкранная страница с плавной прокруткой.
- * Своя «шапка» с фото на весь экран, поверх — градиент и кнопка закрытия,
- * ниже — карточка с датой, заголовком и полным текстом.
- * Листание — свайпом влево/вправо и кнопками внизу.
+ * Просмотр события: полноэкранная лента. Каждая карточка нарисована заранее,
+ * поэтому соседняя видна уже во время свайпа — без белой вспышки.
+ * Листание — свайпом и кнопками внизу, вертикально — обычная прокрутка текста.
  */
 function openNewsReader(items, startIndex = 0) {
   if (!items?.length) return
+  let list = items
   let index = Math.max(0, Math.min(startIndex, items.length - 1))
   closeHwLightbox({ animate: false })
   document.querySelectorAll('.news-reader').forEach((n) => n.remove())
 
-  const overlay = el('div', {
-    className: 'news-reader',
-    role: 'dialog',
-    'aria-modal': 'true',
-    'aria-label': 'Событие',
-  })
-  const page = el('div', { className: 'news-reader-page' })
-
+  const { overlay, viewport, track } = createReaderShell('Событие')
   let closing = false
+
   const close = () => {
     if (closing) return
     closing = true
@@ -8430,16 +8466,12 @@ function openNewsReader(items, startIndex = 0) {
     window.setTimeout(() => overlay.remove(), 260)
   }
 
-  const paint = () => {
-    const item = items[index]
-    const images = (item.attachments || []).filter(
-      (a) => /^image\//i.test(a.mime || '') || /\.(jpe?g|png|webp|gif)$/i.test(a.url || ''),
-    )
+  /** Одна карточка события: обложка, текст, инструменты, точки. */
+  const buildCard = (item, i) => {
+    const { photos, videos } = splitNewsMedia(item.attachments)
     const canEditNews = canWriteNews(state.groupId)
-    const cover = images[0]
+    const cover = photos[0]
 
-    // Фон — та же картинка, размытая и растянутая: рамки вокруг фото не будет.
-    // Сам снимок показываем целиком (contain), ничего не обрезаем.
     const hero = el('div', { className: 'news-reader-hero' }, [
       cover
         ? el('div', {
@@ -8457,14 +8489,14 @@ function openNewsReader(items, startIndex = 0) {
           })
         : el('div', { className: 'news-reader-cover news-reader-cover-blank', 'aria-hidden': 'true' }),
       el('div', { className: 'news-reader-scrim', 'aria-hidden': 'true' }),
-      images.length > 1
+      photos.length > 1
         ? el('button', {
             type: 'button',
             className: 'news-reader-zoom',
-            text: `Все фото · ${images.length}`,
+            text: `Все фото · ${photos.length}`,
             onClick: () => {
               hapticTap()
-              openHwLightbox(images.map((x) => x.url), 0)
+              openHwLightbox(photos.map((x) => x.url), 0)
             },
           })
         : null,
@@ -8479,18 +8511,32 @@ function openNewsReader(items, startIndex = 0) {
       ]),
     ])
 
-    // Остальные фото — уже в тексте, чтобы не отбирать внимание у обложки.
-    const extra = images.slice(1)
+    const extra = photos.slice(1)
 
-    const body = el('div', { className: 'news-reader-content' }, [
+    const content = el('div', { className: 'news-reader-content' }, [
       item.body
         ? el('p', { className: 'news-reader-text', text: item.body })
         : el('p', { className: 'news-reader-text news-reader-text-muted', text: 'Подробностей пока нет.' }),
+      videos.length
+        ? el(
+            'div',
+            { className: 'news-reader-videos' },
+            videos.map((v) =>
+              el('video', {
+                className: 'news-reader-video',
+                src: v.url,
+                controls: true,
+                playsinline: true,
+                preload: 'metadata',
+              }),
+            ),
+          )
+        : null,
       extra.length
         ? el(
             'div',
             { className: 'news-reader-extra' },
-            extra.map((a, i) =>
+            extra.map((a, k) =>
               el('img', {
                 className: 'news-reader-extra-photo',
                 src: a.url,
@@ -8499,124 +8545,159 @@ function openNewsReader(items, startIndex = 0) {
                 decoding: 'async',
                 onClick: () => {
                   hapticTap()
-                  openHwLightbox(images.map((x) => x.url), i + 1)
+                  openHwLightbox(photos.map((x) => x.url), k + 1)
                 },
               }),
             ),
           )
         : null,
-      items.length > 1
+      list.length > 1
         ? el('div', { className: 'news-reader-foot' }, [
-            el('span', { className: 'news-reader-foot-count', text: `${index + 1} из ${items.length}` }),
+            el('span', { className: 'news-reader-foot-count', text: `${i + 1} из ${list.length}` }),
           ])
         : null,
     ])
 
-    const pager = items.length > 1
-      ? el('nav', { className: 'news-reader-pager' }, [
+    const toolbar = canEditNews
+      ? el('div', { className: 'news-reader-toolbar' }, [
           el('button', {
             type: 'button',
-            className: 'news-reader-pager-btn',
-            text: '‹',
-            'aria-label': 'Предыдущее событие',
-            disabled: index === 0,
-            onClick: () => step(-1),
+            className: 'news-reader-tool is-up',
+            text: 'Выше',
+            title: 'Показывать раньше',
+            onClick: () => move(i, -1),
           }),
-          el(
-            'div',
-            { className: 'news-reader-pager-dots' },
-            items.map((n, i) =>
-              el('button', {
-                type: 'button',
-                className: i === index ? 'news-reader-pager-dot is-on' : 'news-reader-pager-dot',
-                'aria-label': `Событие ${i + 1}`,
-                onClick: () => {
-                  if (i === index) return
-                  index = i
-                  state.newsIndex = i
-                  paint()
-                  page.scrollTop = 0
-                },
-              }),
-            ),
-          ),
           el('button', {
             type: 'button',
-            className: 'news-reader-pager-btn',
-            text: '›',
-            'aria-label': 'Следующее событие',
-            disabled: index >= items.length - 1,
-            onClick: () => step(1),
+            className: 'news-reader-tool is-down',
+            text: 'Ниже',
+            title: 'Показывать позже',
+            onClick: () => move(i, 1),
+          }),
+          el('button', {
+            type: 'button',
+            className: 'news-reader-tool',
+            text: 'Изменить',
+            onClick: () => edit(i),
+          }),
+          el('button', {
+            type: 'button',
+            className: 'news-reader-tool is-del',
+            text: 'Удалить',
+            onClick: () => removeItem(i),
           }),
         ])
       : null
 
-    page.replaceChildren(
-      hero,
-      body,
-      el('div', { className: 'news-reader-toolbar' }, [
-        canEditNews
-          ? el('button', {
+    const pager =
+      list.length > 1
+        ? el('nav', { className: 'news-reader-pager' }, [
+            el('button', {
               type: 'button',
-              className: 'news-reader-tool is-up',
-              text: 'Выше',
-              title: 'Показывать раньше',
-              onClick: () => move(index, -1),
-            })
-          : null,
-        canEditNews
-          ? el('button', {
+              className: 'news-reader-pager-btn',
+              text: '‹',
+              'aria-label': 'Предыдущее событие',
+              disabled: i === 0,
+              onClick: () => step(-1),
+            }),
+            el(
+              'div',
+              { className: 'news-reader-pager-dots' },
+              list.map((n, k) =>
+                el('button', {
+                  type: 'button',
+                  className: k === index ? 'news-reader-pager-dot is-on' : 'news-reader-pager-dot',
+                  'aria-label': `Событие ${k + 1}`,
+                  onClick: () => goTo(k),
+                }),
+              ),
+            ),
+            el('button', {
               type: 'button',
-              className: 'news-reader-tool is-down',
-              text: 'Ниже',
-              title: 'Показывать позже',
-              onClick: () => move(index, 1),
-            })
-          : null,
-        canEditNews
-          ? el('button', {
-              type: 'button',
-              className: 'news-reader-tool is-del',
-              text: 'Удалить',
-              onClick: () => removeItem(),
-            })
-          : null,
-      ]),
-      pager,
-    )
+              className: 'news-reader-pager-btn',
+              text: '›',
+              'aria-label': 'Следующее событие',
+              disabled: i >= list.length - 1,
+              onClick: () => step(1),
+            }),
+          ])
+        : null
+
+    return el('article', { className: 'news-reader-card' }, [hero, content, toolbar, pager])
   }
 
-  const step = (delta) => {
-    const next = index + delta
-    if (next < 0 || next >= items.length) return
-    hapticTap()
+  /** Перерисовать ленту целиком — нужно после правки, удаления и смены порядка. */
+  const repaint = () => {
+    const cards = list.map((n, i) => buildCard(n, i))
+    mountReaderCards(track, cards, index)
+    paintDots()
+  }
+
+  const paintDots = () => {
+    const dots = track.children[index]?.querySelectorAll('.news-reader-pager-dot')
+    if (dots?.length) [...dots].forEach((d, k) => d.classList.toggle('is-on', k === index))
+  }
+
+  const goTo = (i) => {
+    const next = Math.max(0, Math.min(list.length - 1, i))
+    if (next === index) return
     index = next
     state.newsIndex = next
-    paint()
-    page.scrollTo({ top: 0, behavior: 'smooth' })
+    scrollReaderTo(track, next)
+    paintDots()
+    hapticTap()
+  }
+
+  const step = (delta) => goTo(index + delta)
+
+  const edit = (i) => {
+    const item = list[i]
+    if (!item) return
+    hapticTap()
+    state.newsEdit = {
+      id: item.id,
+      title: item.title,
+      body: item.body,
+      attachments: (item.attachments || []).slice(),
+      pinned: !!item.pinned,
+      toAll: !item.groupId,
+      faculties: (item.faculties || []).slice(),
+    }
+    state.newsCompose = true
+    state.newsDraft = null
+    close()
+    if (state.tab === 'home' && !homeProgramKind()) {
+      if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
+    } else {
+      state.tab = 'home'
+      render({ force: true })
+    }
+    requestAnimationFrame(() => {
+      document.querySelector('.news-compose')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
   }
 
   const move = async (i, dir) => {
-    const item = items[i]
+    const item = list[i]
     if (!item) return
     hapticTap()
     try {
       await moveNews(item.id, dir, state.groupId)
       const fresh = getNews(state.groupId)
       const at = fresh.findIndex((n) => n.id === item.id)
+      list = fresh
       index = at < 0 ? 0 : at
-      items = fresh
       state.newsIndex = index
       showToast(dir < 0 ? 'Подняли выше' : 'Опустили ниже')
-      paint()
+      repaint()
       if (refreshTabPanes(['home'])) softUpdateNav()
     } catch (err) {
       showToast(err.message, true)
     }
   }
 
-  const removeItem = async () => {
-    const item = items[index]
+  const removeItem = async (i) => {
+    const item = list[i]
     if (!item) return
     if (!confirm(`Удалить «${item.title}»?`)) return
     try {
@@ -8630,7 +8711,7 @@ function openNewsReader(items, startIndex = 0) {
     }
   }
 
-  paint()
+  repaint()
 
   overlay.append(
     el('button', {
@@ -8640,21 +8721,18 @@ function openNewsReader(items, startIndex = 0) {
       'aria-label': 'Закрыть',
       onClick: close,
     }),
-    page,
+    viewport,
   )
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) close()
   })
 
-  attachReaderSwipe({
-    page,
-    count: () => items.length,
+  attachCardSwipe({
+    viewport,
+    track,
+    count: () => list.length,
     index: () => index,
-    onStep: (dir) => {
-      index += dir
-      state.newsIndex = index
-      paint()
-    },
+    goTo,
     onClose: close,
   })
 
@@ -8664,8 +8742,14 @@ function openNewsReader(items, startIndex = 0) {
     else if (e.key === 'ArrowRight') step(1)
   }
   document.addEventListener('keydown', onKey)
-  const cleanup = () => document.removeEventListener('keydown', onKey)
-  overlay.addEventListener('remove', cleanup)
+  overlay.addEventListener('remove', () => document.removeEventListener('keydown', onKey))
+
+  // Поворот телефона или изменение ширины — лента должна остаться на своём слайде.
+  const onResize = () => {
+    if (document.body.contains(overlay)) scrollReaderTo(track, index, false)
+  }
+  window.addEventListener('resize', onResize, { passive: true })
+  overlay.addEventListener('remove', () => window.removeEventListener('resize', onResize))
 
   document.body.append(overlay)
   lockReaderScroll()
@@ -8712,6 +8796,8 @@ function renderHomeHero(group) {
           className: 'home-hero-empty-btn',
           text: '+ Добавить событие',
           onClick: () => {
+            state.newsEdit = null
+            state.newsDraft = null
             state.newsCompose = true
             render({ force: true })
           },
@@ -8894,7 +8980,10 @@ function renderHomeHero(group) {
       onClick: () => {
         hapticTap()
         state.newsCompose = !state.newsCompose
-        if (!state.newsCompose) state.newsDraft = null
+        if (!state.newsCompose) {
+          state.newsDraft = null
+          state.newsEdit = null
+        }
         render({ force: true })
         if (state.newsCompose) {
           requestAnimationFrame(() => {
@@ -9003,12 +9092,27 @@ function canWriteNews(groupId) {
 const MAX_NEWS_PHOTOS = 10
 
 /**
- * Компоузер события: заголовок, текст, фото, факультеты, закрепление.
- * Плюс на карточке превращается в минус — это одна и та же кнопка.
+ * Компоузер события: заголовок, текст, фото и видео, факультеты, закрепление.
+ * Одна и та же форма работает и для публикации, и для правки уже
+ * опубликованного: в режиме правки все поля заполнены тем, что было.
  */
 function renderNewsComposer(group) {
   if (!canWriteNews(state.groupId)) return null
-  if (!state.newsDraft) {
+  const editing = state.newsEdit
+  if (editing) {
+    // Правка: черновик собираем из самого события, ввод не теряется при перерисовке.
+    if (!state.newsDraft || state.newsDraft.editId !== editing.id) {
+      state.newsDraft = {
+        editId: editing.id,
+        title: editing.title || '',
+        body: editing.body || '',
+        pinned: !!editing.pinned,
+        attachments: (editing.attachments || []).slice(),
+        toAll: !!editing.toAll,
+        faculties: (editing.faculties || []).slice(),
+      }
+    }
+  } else if (!state.newsDraft || state.newsDraft.editId) {
     state.newsDraft = {
       title: '',
       body: '',
@@ -9047,7 +9151,7 @@ function renderNewsComposer(group) {
 
   const file = el('input', {
     type: 'file',
-    accept: 'image/jpeg,image/png,image/webp,image/gif',
+    accept: 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,video/x-m4v',
     multiple: true,
   })
   const pinned = el('input', { type: 'checkbox' })
@@ -9117,17 +9221,47 @@ function renderNewsComposer(group) {
     syncHint()
   }
 
+  // —— Вложения: фото плитками, видео — карточкой с плеером.
   const preview = el('div', { className: 'news-compose-preview' })
   const paintPreview = () => {
     preview.replaceChildren()
     if (!draft.attachments.length) {
-      preview.append(el('p', { className: 'muted', text: 'Фото не выбрано' }))
+      preview.append(el('p', { className: 'muted', text: 'Фото и видео не выбраны' }))
       return
     }
     draft.attachments.forEach((a, i) => {
+      const { videos } = splitNewsMedia([a])
+      const isVideo = videos.length > 0
+      const photoIndex = isVideo
+        ? -1
+        : splitNewsMedia(draft.attachments.slice(0, i + 1)).photos.length - 1
       preview.append(
-        el('div', { className: 'news-compose-thumb' }, [
-          el('img', { src: a.url, alt: a.name || '', loading: 'lazy', decoding: 'async' }),
+        el('div', { className: `news-compose-thumb${isVideo ? ' is-video' : ''}` }, [
+          isVideo
+            ? el('video', {
+                className: 'news-compose-thumb-video',
+                src: a.url,
+                muted: true,
+                playsinline: true,
+                preload: 'metadata',
+              })
+            : el('img', { src: a.url, alt: a.name || '', loading: 'lazy', decoding: 'async' }),
+          !isVideo && photoIndex === 0
+            ? el('span', { className: 'news-compose-thumb-badge', text: 'Обложка' })
+            : !isVideo
+              ? el('button', {
+                  type: 'button',
+                  className: 'news-compose-thumb-cover',
+                  text: 'Обложка',
+                  title: 'Сделать обложкой',
+                  onClick: () => {
+                    // Обложка — первое фото. Видео остаётся на своих местах ниже.
+                    const [picked] = draft.attachments.splice(i, 1)
+                    draft.attachments.unshift(picked)
+                    paintPreview()
+                  },
+                })
+              : null,
           el('button', {
             type: 'button',
             className: 'news-compose-thumb-x',
@@ -9143,7 +9277,7 @@ function renderNewsComposer(group) {
     })
     if (draft.attachments.length >= MAX_NEWS_PHOTOS) {
       preview.append(
-        el('p', { className: 'muted', text: `Достигнут максимум — ${MAX_NEWS_PHOTOS} фото.` }),
+        el('p', { className: 'muted', text: `Достигнут максимум — ${MAX_NEWS_PHOTOS} файлов.` }),
       )
     }
   }
@@ -9180,13 +9314,14 @@ function renderNewsComposer(group) {
     if (!file.files?.length) return
     const room = MAX_NEWS_PHOTOS - draft.attachments.length
     if (room <= 0) {
-      showToast(`Максимум ${MAX_NEWS_PHOTOS} фото`, true)
+      showToast(`Максимум ${MAX_NEWS_PHOTOS} файлов`, true)
       file.value = ''
       return
     }
     try {
       const picked = [...file.files].slice(0, Math.min(room, 4))
-      showToast('Загружаю фото…')
+      const hasVideo = picked.some((f) => /^video\//i.test(f.type || ''))
+      showToast(hasVideo ? 'Загружаю видео… это может занять время' : 'Загружаю фото…')
       const uploaded = await uploadHomeworkFiles(state.groupId, picked)
       draft.attachments.push(...uploaded)
       paintPreview()
@@ -9197,7 +9332,11 @@ function renderNewsComposer(group) {
     }
   })
 
-  const submit = el('button', { className: 'btn', type: 'submit', text: 'Опубликовать' })
+  const submit = el('button', {
+    className: 'btn',
+    type: 'submit',
+    text: editing ? 'Сохранить' : 'Опубликовать',
+  })
   const cancel = el('button', {
     type: 'button',
     className: 'btn btn-ghost',
@@ -9205,6 +9344,7 @@ function renderNewsComposer(group) {
     onClick: () => {
       state.newsCompose = false
       state.newsDraft = null
+      state.newsEdit = null
       if (!refreshTabPanes(['home'])) render({ force: true })
       else syncComposeToggle()
     },
@@ -9214,8 +9354,12 @@ function renderNewsComposer(group) {
     el('div', { className: 'field' }, [el('label', { text: 'Заголовок' }), title]),
     el('div', { className: 'field' }, [el('label', { text: 'Текст' }), body]),
     el('div', { className: 'field' }, [
-      el('label', { text: `Фото (до ${MAX_NEWS_PHOTOS})` }),
+      el('label', { text: `Фото и видео (до ${MAX_NEWS_PHOTOS})` }),
       file,
+      el('p', {
+        className: 'muted news-compose-hint',
+        text: 'Первое фото — обложка. Видео: mp4, webm, mov — до 60 МБ.',
+      }),
       preview,
     ]),
     el('div', { className: 'field' }, [
@@ -9244,32 +9388,41 @@ function renderNewsComposer(group) {
       return
     }
     submit.disabled = true
-    submit.textContent = 'Публикую…'
+    submit.textContent = editing ? 'Сохраняю…' : 'Публикую…'
+    const payload = {
+      groupId: toAll.checked && isAdmin ? null : state.groupId,
+      title: t,
+      body: body.value.trim(),
+      attachments: draft.attachments,
+      pinned: pinned.checked,
+      faculties: draft.faculties,
+    }
     try {
-      await addNews({
-        groupId: toAll.checked && isAdmin ? null : state.groupId,
-        title: t,
-        body: body.value.trim(),
-        attachments: draft.attachments,
-        pinned: pinned.checked,
-        faculties: draft.faculties,
-      })
+      if (editing) {
+        await updateNews({ id: editing.id, ...payload })
+      } else {
+        await addNews(payload)
+      }
       state.newsCompose = false
       state.newsDraft = null
+      state.newsEdit = null
       state.newsIndex = 0
-      showToast('Событие опубликовано')
+      showToast(editing ? 'Событие сохранено' : 'Событие опубликовано')
       if (!refreshTabPanes(['home'])) render({ force: true })
       else syncComposeToggle()
     } catch (err) {
       submit.disabled = false
-      submit.textContent = 'Опубликовать'
+      submit.textContent = editing ? 'Сохранить' : 'Опубликовать'
       showToast(err.message, true)
     }
   })
 
   card.append(
     el('div', { className: 'news-compose-head' }, [
-      el('h3', { className: 'news-compose-title', text: 'Новое событие' }),
+      el('h3', {
+        className: 'news-compose-title',
+        text: editing ? 'Правка события' : 'Новое событие',
+      }),
     ]),
     form,
   )
@@ -10616,7 +10769,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=145`, { scope: base })
+    .register(`${base}sw.js?v=146`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
