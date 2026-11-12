@@ -11,6 +11,8 @@ const primary = PROXY || DIRECT
 export const supabaseConfigured = Boolean(primary && anon && !primary.includes('YOUR_'))
 
 const FETCH_MS = 12000
+/** Первая попытка не должна съедать весь таймаут: иначе при VPN ждём мёртвый хост. */
+const FIRST_MS = 5500
 
 /** Какой хост ответил последним успешно — дальше пробуем его первым */
 let preferred = null // 'proxy' | 'direct'
@@ -23,6 +25,8 @@ function hostsFor(url) {
     if (!base) return
     list.push({ kind, href: base + path })
   }
+  // Прокси (Cloudflare Worker) доступен и из РФ, и через VPN — он первый.
+  // Прямой supabase.co часто режется DPI, а под VPN может «висеть» до таймаута.
   if (preferred === 'direct') {
     push('direct', DIRECT)
     push('proxy', PROXY)
@@ -30,10 +34,8 @@ function hostsFor(url) {
     push('proxy', PROXY)
     push('direct', DIRECT)
   } else {
-    // Сначала прямой (быстрее без VPN), потом прокси (обход DPI)
-    push('direct', DIRECT)
     push('proxy', PROXY)
-    // если задан только один — он уже в списке
+    push('direct', DIRECT)
     if (!list.length) push('proxy', primary)
   }
   // убрать дубли
@@ -66,15 +68,106 @@ async function oneFetch(href, init, ms) {
   }
 }
 
+/** Проверить оба хоста параллельно и запомнить живой. Вызывается один раз при старте. */
+export async function probeHosts() {
+  const list = [
+    ['proxy', PROXY],
+    ['direct', DIRECT],
+  ].filter(([, base]) => base)
+  if (!list.length) return null
+  if (list.length === 1) {
+    preferred = list[0][0]
+    return preferred
+  }
+  const results = await Promise.all(
+    list.map(async ([kind, base]) => {
+      try {
+        const r = await oneFetch(`${base}/rest/v1/`, { method: 'GET', headers: { apikey: anon } }, 5000)
+        return r.ok || r.status === 400 || r.status === 401 || r.status === 404 ? kind : null
+      } catch {
+        return null
+      }
+    }),
+  )
+  // Предпочитаем прокси, если живы оба: он одинаково работает в РФ и за рубежом.
+  preferred = results[0] || results[1] || preferred
+  return preferred
+}
+
+if (typeof window !== 'undefined') {
+  // Не ждём: пусть проверка идёт параллельно с загрузкой данных.
+  void probeHosts()
+  window.addEventListener('online', () => {
+    void probeHosts()
+  })
+}
+
+/**
+ * Диагностика для экрана поддержки: что реально отвечает — прямой Supabase,
+ * прокси или GitHub. Показывает задержку в мс, чтобы отличить «медленно»
+ * от «заблокировано» (например, под VPN).
+ */
+export async function checkConnectivity() {
+  const rows = []
+  const probe = async (name, href) => {
+    const t0 = Date.now()
+    try {
+      const r = await oneFetch(href, { method: 'GET', headers: { apikey: anon } }, 6000)
+      const ok = r.status < 500
+      rows.push({ name, ok, ms: Date.now() - t0, status: r.status })
+      return ok
+    } catch (e) {
+      rows.push({ name, ok: false, ms: Date.now() - t0, status: 0, error: String(e?.message || e) })
+      return false
+    }
+  }
+
+  if (DIRECT) await probe('Supabase (напрямую)', `${DIRECT}/rest/v1/`)
+  if (PROXY && PROXY !== DIRECT) await probe('Прокси Cloudflare', `${PROXY}/rest/v1/`)
+  try {
+    await probe('Сайт (GitHub)', `${location.origin}/index.html?ping=${Date.now()}`)
+  } catch {
+    /* ignore */
+  }
+  preferred = rows.find((r) => r.ok && r.name.startsWith('Прокси'))
+    ? 'proxy'
+    : rows.find((r) => r.ok && r.name.startsWith('Supabase'))
+      ? 'direct'
+      : preferred
+  return rows
+}
+
+/** Чтение (GET/HEAD) гоним на оба хоста сразу — первый ответивший и побеждает. */
+async function raceRead(targets, init) {
+  const attempts = targets.map((t) =>
+    oneFetch(t.href, init, FETCH_MS).then((resp) => {
+      preferred = t.kind
+      return resp
+    }),
+  )
+  try {
+    return await Promise.any(attempts)
+  } catch (e) {
+    const reasons = e?.errors || []
+    const net = reasons.find((x) => !isNetworkFail(x))
+    throw net || reasons[0] || e
+  }
+}
+
 /** REST/Storage: пробуем direct и proxy, запоминаем рабочий */
 async function smartFetch(input, init = {}) {
   const targets = hostsFor(input)
   if (!targets.length) throw new Error('Нет URL Supabase')
 
+  const method = String(init?.method || 'GET').toUpperCase()
+  // Запись (RPC, POST/PATCH) — только последовательно: иначе можно записать дважды.
+  if (method === 'GET' || method === 'HEAD') return raceRead(targets, init)
+
   let lastErr = null
-  for (const t of targets) {
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i]
     try {
-      const resp = await oneFetch(t.href, init, FETCH_MS)
+      const resp = await oneFetch(t.href, init, i === 0 && !preferred ? FIRST_MS : FETCH_MS)
       preferred = t.kind
       return resp
     } catch (e) {
