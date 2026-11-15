@@ -10,12 +10,22 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const TOKEN = process.env.TG_BOT_TOKEN
-const ADMIN = String(process.env.TG_ADMIN_CHAT_ID || 'ADMIN_CHAT_ID_REMOVED')
+const ADMIN = String(process.env.TG_ADMIN_CHAT_ID || '')
 const SB_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_DIRECT_URL || '').replace(
   /\/$/,
   '',
 )
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+
+// Без токена и админ-чата бот не сможет ни читать сообщения, ни отвечать.
+if (!TOKEN) {
+  console.error('Нет TG_BOT_TOKEN: задай переменную окружения или GitHub Secret.')
+  process.exit(1)
+}
+if (!ADMIN) {
+  console.error('Нет TG_ADMIN_CHAT_ID: задай переменную окружения или GitHub Secret.')
+  process.exit(1)
+}
 
 const BTN_SUPPORT = '✍️ Написать в поддержку'
 const BTN_REPLY = '✍️ Ответить'
