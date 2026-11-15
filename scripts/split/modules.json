@@ -248,5 +248,51 @@
    "heroAutoTimer",
    "heroAutoObserver"
   ]
+ },
+ "programs": {
+  "file": "features/programs.js",
+  "viaHub": true,
+  "header": "// Образовательные программы: список, читалка и редактор.\n//\n// Программы ведут старосты и админы; читалка общая для всех.\n// Картинки и видео берутся из тех же файлов, что и вложения к ДЗ.",
+  "names": [
+   "programImages",
+   "programVideoSrc",
+   "canManagePrograms",
+   "programGroupId",
+   "programMetaLine",
+   "emptyProgramDraft",
+   "renderPrograms",
+   "openProgramReader",
+   "renderProgramEditor"
+  ]
+ },
+ "more": {
+  "file": "screens/more.js",
+  "viaHub": true,
+  "header": "// Экран «Профиль»: кабинет, состав группы, коды, контакты, замены\n// и мелкие настройки (тема, установка, выход).\n//\n// Здесь же экраны «забанен» и «сайт закрыт» — они тоже про доступ.\n// Таблицы ролей и подписей вынесены в constants.js.",
+  "names": [
+   "moreSvg",
+   "moreThemeIcon",
+   "moreSettingsRow",
+   "renderCabinetCard",
+   "renderMore",
+   "openProgramScreen",
+   "renderMoreStudents",
+   "renderMoreMyCode",
+   "renderMoreContacts",
+   "renderMoreOverrides",
+   "paintStaffCard",
+   "renderMoreGroup",
+   "renderMoreV2",
+   "renderMoreClassic",
+   "renderBannedGate",
+   "renderClosedGate",
+   "renderNav",
+   "tabSwitchShieldActive",
+   "clearCascadeAnim",
+   "renderMoreSupport",
+   "renderProfileAvatarControls",
+   "loadImageFromFile",
+   "openImageCropEditor"
+  ]
  }
 }

@@ -17,6 +17,9 @@
 const noop = () => {}
 
 export const hub = {
+  formatPhone: noop,
+  tabSwitchShieldUntil: noop,
+  programsLoaded: noop,
   heroAutoObserver: noop,
   heroAutoTimer: noop,
   auditDate: noop,
