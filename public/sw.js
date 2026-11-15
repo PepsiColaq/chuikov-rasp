@@ -1,5 +1,5 @@
 /* Offline shell — bump CACHE to drop stale HTML/JS */
-const CACHE = 'rasp-shell-v158'
+const CACHE = 'rasp-shell-v159'
 const SCOPE_PATH = '/chuikov-rasp/'
 
 function assetUrlsFromHtml(html) {

@@ -17,6 +17,7 @@ import { readXlsx } from '../lib/xlsx.js'
 import { addAdmin, curatorCreate, curatorRevoke, curatorsList, listAdmins, newStudentCode, revokeAdmin } from '../lib/journal.js'
 import { privacyParagraphs, termsParagraphs } from '../lib/legal.js'
 import { hub } from '../app/hub.js'
+import { swapKeepScroll } from '../lib/dom-stable.js'
 
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
 const auditDate = (...args) => hub.auditDate(...args)
@@ -353,7 +354,6 @@ export function renderGroupPicker() {
   const q = el('input', { type: 'search', placeholder: 'Поиск группы…' })
   const list = el('div', { className: 'group-list' })
   const paint = () => {
-    list.replaceChildren()
     const query = q.value.trim()
     // Список — как раньше, но фильтр идёт по нормализованному ключу:
     // «0903пд5», «0903 пд 5», «0903-pd5» находят «0903-ПД5».
@@ -365,8 +365,12 @@ export function renderGroupPicker() {
       if (strong.length) hits = strong
     }
     const rows = query ? hits.map((hit) => hit.group) : all
-    for (const g of rows) {
-      list.append(
+
+    // swapKeepScroll вместо replaceChildren: иначе контейнер на миг пустеет,
+    // документ становится короче и браузер сам прокручивает страницу наверх —
+    // именно это выглядело как «сайт закрыл клавиатуру и улетел в начало».
+    swapKeepScroll(list, () =>
+      rows.map((g) =>
         el(
           'button',
           {
@@ -377,10 +381,10 @@ export function renderGroupPicker() {
           [
             el('strong', { text: g.name }),
             el('span', { text: g.faculty ? `Факультет ${g.faculty}` : ' ' }),
-          ],
-        ),
+          ]
+        )
       )
-    }
+    )
   }
   q.addEventListener('input', paint)
   paint()
@@ -1086,24 +1090,22 @@ export function renderAdminPanel() {
     const accessList = el('div', { className: 'admin-people-list' })
     const paintAccess = async () => {
       state.roomsAccessQuery = accessSearch.value || ''
-      accessList.replaceChildren(el('p', { className: 'muted', text: 'Загружаем…' }))
       try {
         const q = normalizePeopleQuery(state.roomsAccessQuery)
         const rows = (await listStarostaCodes()).filter((r) => !r.banned)
         const filtered = q
           ? rows.filter((r) => normalizePeopleQuery(r.label).includes(q))
           : rows
-        accessList.replaceChildren()
+        const nodes = []
         if (!filtered.length) {
-          accessList.append(
+          nodes.push(
             el('p', {
               className: 'muted',
               text: q ? 'Никого не нашли по этому имени.' : 'Пока нет выданных кодов.',
             }),
           )
-          return
-        }
-        for (const row of filtered) {
+        } else {
+          for (const row of filtered) {
           const on = !!row.canFreeRooms
           const card = el('div', { className: `admin-people-card${on ? ' is-on' : ''}` }, [
             el('div', { className: 'admin-people-meta' }, [
@@ -1128,10 +1130,14 @@ export function renderAdminPanel() {
               },
             }),
           ])
-          accessList.append(card)
+          nodes.push(card)
+          }
         }
+        // Одна вставка вместо «очистить → добавить по одному»: страница
+        // не прыгает наверх, пока человек набирает имя в поиске.
+        swapKeepScroll(accessList, nodes)
       } catch (err) {
-        accessList.replaceChildren(el('p', { className: 'muted', text: err.message }))
+        swapKeepScroll(accessList, [el('p', { className: 'muted', text: err.message })])
       }
     }
     accessSearch.addEventListener('input', () => {
@@ -1165,24 +1171,22 @@ export function renderAdminPanel() {
     const bansList = el('div', { className: 'admin-people-list' })
     const paintBans = async () => {
       state.bansQuery = bansSearch.value || ''
-      bansList.replaceChildren(el('p', { className: 'muted', text: 'Загружаем…' }))
       try {
         const q = normalizePeopleQuery(state.bansQuery)
         const rows = await listStarostaCodes()
         const filtered = q
           ? rows.filter((r) => normalizePeopleQuery(r.label).includes(q))
           : rows
-        bansList.replaceChildren()
+        const nodes = []
         if (!filtered.length) {
-          bansList.append(
+          nodes.push(
             el('p', {
               className: 'muted',
               text: q ? 'Никого не нашли по этому имени.' : 'Пока нет выданных кодов.',
             }),
           )
-          return
-        }
-        for (const row of filtered) {
+        } else {
+          for (const row of filtered) {
           const banned = !!row.banned
           const banDraft = state.adminBanId === row.id
           const reasonShown = (row.banReason || '').trim()
@@ -1264,10 +1268,12 @@ export function renderAdminPanel() {
               }),
             )
           }
-          bansList.append(card)
+          nodes.push(card)
+          }
         }
+        swapKeepScroll(bansList, nodes)
       } catch (err) {
-        bansList.replaceChildren(el('p', { className: 'muted', text: err.message }))
+        swapKeepScroll(bansList, [el('p', { className: 'muted', text: err.message })])
       }
     }
     bansSearch.addEventListener('input', () => {
@@ -2053,24 +2059,21 @@ export function renderAdminPanel() {
     const listBox = el('div', { className: 'curator-list' })
 
     const paint = async () => {
-      listBox.replaceChildren(el('p', { className: 'muted', text: 'Загружаем…' }))
       try {
         const rows = await curatorsList()
-        listBox.replaceChildren()
+        const nodes = []
         if (!rows.length) {
-          listBox.append(
+          nodes.push(
             el('p', {
               className: 'muted',
               style: 'margin:0;font-size:12.5px',
               text: 'Кураторов пока нет.',
             }),
           )
-          return
-        }
-        for (const row of rows) {
+        } else {
+          for (const row of rows) {
           const codeText = String(row.code || '').trim()
-          listBox.append(
-            el('div', { className: 'curator-row' }, [
+          const rowNode = el('div', { className: 'curator-row' }, [
               el('div', { className: 'curator-row-main' }, [
                 el('strong', { text: row.label || 'Куратор' }),
                 el('span', {
@@ -2108,9 +2111,11 @@ export function renderAdminPanel() {
                   }
                 },
               }),
-            ]),
-          )
+            ])
+            nodes.push(rowNode)
+          }
         }
+        swapKeepScroll(listBox, nodes)
       } catch (err) {
         const msg = String(err?.message || '')
         listBox.replaceChildren(

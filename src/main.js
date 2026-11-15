@@ -156,6 +156,7 @@ import { wireHub } from './app/hub.js'
 import { setInitialDataLoading } from './app/loading-state.js'
 import { programsLoaded } from './app/programs-cache.js'
 import { tabSwitchShieldActive } from './app/tab-shield.js'
+import { captureFocus, restoreFocus } from './lib/dom-stable.js'
 
 // Отдаём вынесенным модулям функции ядра.
 // Список собирается автоматически: берутся ровно те имена, которые модули
@@ -211,7 +212,13 @@ function softRefreshCurrentTab() {
     pendingRedraw = true
     return
   }
+  // refreshTabPanes сам вернёт false, если человек печатает — тогда
+  // откладываем, а не сносим весь экран полным render().
   if (!refreshTabPanes([state.tab])) {
+    if (isEditingFormNow()) {
+      pendingRedraw = true
+      return
+    }
     render({ force: true })
     return
   }
@@ -225,7 +232,12 @@ function redrawAfterData(tabIds = ['hw', 'schedule']) {
     pendingRedraw = true
     return
   }
+  // Та же логика: не снимаем экран, если человек что-то вводит.
   if (!refreshTabPanes(tabIds)) {
+    if (isEditingFormNow()) {
+      pendingRedraw = true
+      return
+    }
     render({ force: true })
     return
   }
@@ -411,6 +423,11 @@ function render(opts = {}) {
   // и возвращаем после — одинаково для всех таких кнопок.
   const keepScroll = opts.keepScroll !== false && group ? readPaneScroll(state.tab) : null
 
+  // Если человек что-то печатал — запоминаем поле, текст и позицию курсора.
+  // Пересборка уничтожает узел: без этого клавиатура закрывается, а
+  // набранное теряется (жалоба: «ввожу группу — сайт закрывает клавиатуру»).
+  const focusSnap = captureFocus()
+
   root.replaceChildren()
   // Жёсткий бан устройства: даже гость не смотрит расписание (админ не режется)
   if (isLocalDeviceBanned() && !adminHere) {
@@ -517,6 +534,10 @@ function render(opts = {}) {
   if (formation) root.append(formation)
   maybeSeekHwDay()
   if (keepScroll && keepScroll.top > 0) restorePaneScroll(state.tab, keepScroll)
+
+  // Возвращаем фокус и набранный текст после пересборки. Без этого поле
+  // ввода просто исчезало — вместе с клавиатурой и введённым текстом.
+  if (focusSnap) restoreFocus(focusSnap, root)
 }
 
 function bootLogoUrl() {
@@ -687,7 +708,12 @@ async function boot() {
     const prev = isSiteEnabled()
     refreshSiteGate()
       .then((open) => {
-        if (prev !== open) render()
+        if (prev === open) return
+        // Смена статуса — это смена всего экрана (заглушка ⇄ приложение),
+        // поэтому полный render здесь неизбежен. Но если человек печатает,
+        // откладываем: иначе поле ввода исчезнет прямо под пальцем.
+        if (canSafeRedraw()) render()
+        else pendingRedraw = true
       })
       .catch(() => {})
   }, 15000)
@@ -1056,7 +1082,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=158`, { scope: base })
+    .register(`${base}sw.js?v=159`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда

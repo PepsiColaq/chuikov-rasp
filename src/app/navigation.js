@@ -46,6 +46,13 @@ export function refreshTabPanes(tabIds, { force = false } = {}) {
   const group = state.groupId ? getGroup(state.groupId) : null
   const track = getPagerTrack()
   if (!track || !group) return false
+
+  // Пока человек печатает — панель не трогаем.
+  // Пересборка узла уничтожает поле ввода: клавиатура закрывается,
+  // прокрутка сбрасывается, набранное теряется. Это касается любой вкладки:
+  // поиск группы, поиск преподавателя, формы админки, поле «Мой код».
+  if (!force && isEditingFormNow()) return false
+
   const ids = (tabIds || TAB_ORDER).map(paneTabId)
   for (const tabId of [...new Set(ids)]) {
     // Профиль перерисовываем только когда открыт подэкран замен —
