@@ -26,7 +26,8 @@ export const SCHEDULE_LESSONS = schedule.lessons
 export const DEFAULT_GROUP_NAME = ''
 
 export function facultyFromName(name) {
-  const n = name.toUpperCase()
+  const n = String(name || '').toUpperCase()
+  if (n.includes('МЧС')) return 'МЧС'
   if (n.includes('ПД')) return 'ПД'
   if (n.includes('ПСА')) return 'ПСА'
   if (n.includes('ПСО')) return 'ПСО'

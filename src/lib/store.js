@@ -51,8 +51,18 @@ function saveOfflineSnap(data) {
         semesterLabel: data.semesterLabel,
         siteEnabled: data.siteEnabled !== false,
         closedMessage: data.closedMessage || '',
+        homeNoLessonsText: data.homeNoLessonsText || '',
+        homeNoLessonsUntil: data.homeNoLessonsUntil || '',
+        formationAutofill: !!data.formationAutofill,
+        formationAutofillMinutes: data.formationAutofillMinutes ?? 15,
+        formationAutofillNeedsMarks: data.formationAutofillNeedsMarks !== false,
+        formationFaculties: data.formationFaculties || [],
+        sessionStart: data.sessionStart || '',
+        sessionEnd: data.sessionEnd || '',
+        sessionLabel: data.sessionLabel || '',
         groups: data.groups,
         lessons: data.lessons,
+        sessionLessons: data.sessionLessons || [],
         homework: data.homework,
         overrides: data.overrides,
         news: data.news,
@@ -73,9 +83,19 @@ function loadOfflineSnap() {
       semesterLabel: raw.semesterLabel || '',
       siteEnabled: raw.siteEnabled !== false,
       closedMessage: raw.closedMessage || '',
+      homeNoLessonsText: raw.homeNoLessonsText || '',
+      homeNoLessonsUntil: raw.homeNoLessonsUntil || '',
+      formationAutofill: !!raw.formationAutofill,
+      formationAutofillMinutes: raw.formationAutofillMinutes ?? 15,
+      formationAutofillNeedsMarks: raw.formationAutofillNeedsMarks !== false,
+      formationFaculties: Array.isArray(raw.formationFaculties) ? raw.formationFaculties : [],
+      sessionStart: raw.sessionStart || '',
+      sessionEnd: raw.sessionEnd || '',
+      sessionLabel: raw.sessionLabel || '',
       adminCodeHash: '',
       groups: raw.groups,
       lessons: raw.lessons || [],
+      sessionLessons: Array.isArray(raw.sessionLessons) ? raw.sessionLessons : [],
       homework: raw.homework || [],
       overrides: raw.overrides || [],
       news: raw.news || [],
@@ -89,6 +109,65 @@ function loadOfflineSnap() {
   } catch {
     return null
   }
+}
+
+const DEFAULT_SETTINGS = {
+  homeNoLessonsText: '',
+  homeNoLessonsUntil: '',
+  formationAutofill: false,
+  formationAutofillMinutes: 15,
+  formationAutofillNeedsMarks: true,
+  formationFaculties: ['ПД', 'МЧС'],
+  sessionStart: '',
+  sessionEnd: '',
+  sessionLabel: '',
+}
+
+/** Ответ RPC может прийти строкой, массивом из одной строки или с lower-case ключами. */
+function parseMetaPayload(data) {
+  let meta = data
+  if (typeof meta === 'string') {
+    try {
+      meta = JSON.parse(meta)
+    } catch {
+      meta = null
+    }
+  }
+  if (Array.isArray(meta)) meta = meta[0] || null
+  return meta && typeof meta === 'object' ? meta : null
+}
+
+function pickMeta(meta, camel, lower, fallback) {
+  if (!meta) return fallback
+  if (meta[camel] !== undefined && meta[camel] !== null) return meta[camel]
+  const lc = meta[lower] ?? meta[lower.toLowerCase()]
+  return lc === undefined || lc === null ? fallback : lc
+}
+
+function settingsFromMeta(meta, base = DEFAULT_SETTINGS) {
+  const out = { ...base }
+  if (!meta) return out
+  const text = pickMeta(meta, 'homeNoLessonsText', 'homenolessonstext', out.homeNoLessonsText)
+  out.homeNoLessonsText = typeof text === 'string' ? text : ''
+  const until = pickMeta(meta, 'homeNoLessonsUntil', 'homenolessonsuntil', out.homeNoLessonsUntil)
+  out.homeNoLessonsUntil = typeof until === 'string' ? until : ''
+  const auto = pickMeta(meta, 'formationAutofill', 'formationautofill', out.formationAutofill)
+  out.formationAutofill = auto === true || auto === 'true'
+  const mins = Number(pickMeta(meta, 'formationAutofillMinutes', 'formationautofillminutes', out.formationAutofillMinutes))
+  out.formationAutofillMinutes = Number.isFinite(mins) ? Math.max(0, Math.min(120, mins)) : 15
+  const need = pickMeta(meta, 'formationAutofillNeedsMarks', 'formationautofillneedsmarks', out.formationAutofillNeedsMarks)
+  out.formationAutofillNeedsMarks = need !== false && need !== 'false'
+  const facs = pickMeta(meta, 'formationFaculties', 'formationfaculties', out.formationFaculties)
+  out.formationFaculties = Array.isArray(facs) && facs.length
+    ? facs.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean)
+    : [...DEFAULT_SETTINGS.formationFaculties]
+  const start = pickMeta(meta, 'sessionStart', 'sessionstart', out.sessionStart)
+  out.sessionStart = typeof start === 'string' ? start : ''
+  const end = pickMeta(meta, 'sessionEnd', 'sessionend', out.sessionEnd)
+  out.sessionEnd = typeof end === 'string' ? end : ''
+  const label = pickMeta(meta, 'sessionLabel', 'sessionlabel', out.sessionLabel)
+  out.sessionLabel = typeof label === 'string' ? label : ''
+  return out
 }
 
 function readSessionRaw() {
@@ -266,8 +345,20 @@ function buildLocalSeed() {
     semesterLabel: SEMESTER_LABEL,
     // Admin code never shipped for offline brute-force; remote login uses server.
     adminCodeHash: '',
+    siteEnabled: true,
+    closedMessage: '',
+    homeNoLessonsText: '',
+    homeNoLessonsUntil: '',
+    formationAutofill: false,
+    formationAutofillMinutes: 15,
+    formationAutofillNeedsMarks: true,
+    formationFaculties: ['ПД', 'МЧС'],
+    sessionStart: '',
+    sessionEnd: '',
+    sessionLabel: '',
     groups,
     lessons,
+    sessionLessons: [],
     overrides: [],
     homework: [],
     news: [],
@@ -282,7 +373,7 @@ function sleep(ms) {
 }
 
 async function loadFromSupabase() {
-  // Пары всегда из seed (уже в телефоне). С сервера — только группы + ДЗ + замены.
+  // Пары всегда из seed (уже в телефоне). С сервера — только группы + ДЗ + замены + сессия.
   const seed = buildLocalSeed()
 
   // Группы не обязательны с сервера: при сбое берём seed
@@ -298,9 +389,28 @@ async function loadFromSupabase() {
   // Иначе при медленной сети/прокси мигает заглушка и админ-баннер.
   let siteEnabled = true
   let closedMessage = 'Сайт временно закрыт. Зайдите позже.'
+  let settings = { ...DEFAULT_SETTINGS }
+
+  // Сначала — что уже лежит на телефоне: если сеть моргнёт, главная не «прыгнет».
   try {
     const snap = loadOfflineSnap()
-    if (snap && typeof snap.siteEnabled === 'boolean') siteEnabled = snap.siteEnabled !== false
+    if (snap) {
+      if (typeof snap.siteEnabled === 'boolean') siteEnabled = snap.siteEnabled !== false
+      settings = settingsFromMeta(
+        {
+          homeNoLessonsText: snap.homeNoLessonsText,
+          homeNoLessonsUntil: snap.homeNoLessonsUntil,
+          formationAutofill: snap.formationAutofill,
+          formationAutofillMinutes: snap.formationAutofillMinutes,
+          formationAutofillNeedsMarks: snap.formationAutofillNeedsMarks,
+          formationFaculties: snap.formationFaculties,
+          sessionStart: snap.sessionStart,
+          sessionEnd: snap.sessionEnd,
+          sessionLabel: snap.sessionLabel,
+        },
+        settings,
+      )
+    }
   } catch {
     /* ignore */
   }
@@ -323,21 +433,15 @@ async function loadFromSupabase() {
         starostaCodeHash: '',
       }))
     }
-    let meta = metaRes.data
-    if (typeof meta === 'string') {
-      try {
-        meta = JSON.parse(meta)
-      } catch {
-        /* keep */
-      }
-    }
-    if (Array.isArray(meta)) meta = meta[0]
+    const meta = parseMetaPayload(metaRes.data)
     if (meta?.semesterLabel) semesterLabel = meta.semesterLabel
     if (meta && typeof meta.siteEnabled === 'boolean') siteEnabled = meta.siteEnabled
     else if (meta && typeof meta.siteenabled === 'boolean') siteEnabled = meta.siteenabled
     if (meta?.closedMessage || meta?.closedmessage) {
       closedMessage = meta.closedMessage || meta.closedmessage
     }
+    // Если SQL-миграция ещё не выполнена, ключей не будет — останутся дефолты.
+    settings = settingsFromMeta(meta, settings)
   } catch {
     /* seed groups OK */
   }
@@ -347,14 +451,19 @@ async function loadFromSupabase() {
 
   let homework = []
   let overrides = []
+  let sessionLessons = []
   try {
-    const [hwRes, ovrRes] = await withTimeout(
+    const [hwRes, ovrRes, sessRes] = await withTimeout(
       Promise.all([
         supabase
           .from('homework')
           .select('*')
           .order('created_at', { ascending: false }),
         supabase.from('overrides').select('id,group_id,lesson_id,on_date,type,new_room,new_subject,note'),
+        supabase
+          .from('session_lessons')
+          .select('id,group_id,on_date,start_time,end_time,subject,teacher,room,kind,remote,batch_id')
+          .order('on_date', { ascending: true }),
       ]),
       12000,
       'ДЗ',
@@ -374,10 +483,14 @@ async function loadFromSupabase() {
         note: o.note || '',
       }))
     }
+    if (!sessRes.error) {
+      sessionLessons = (sessRes.data || []).map(mapSessionRow)
+    }
   } catch {
     const snap = loadOfflineSnap()
     homework = snap?.homework || []
     overrides = snap?.overrides || []
+    sessionLessons = snap?.sessionLessons || []
   }
 
   return {
@@ -385,9 +498,11 @@ async function loadFromSupabase() {
     semesterLabel,
     siteEnabled,
     closedMessage,
+    ...settings,
     adminCodeHash: '',
     groups,
     lessons,
+    sessionLessons,
     homework,
     overrides,
     audit: [],
@@ -430,14 +545,30 @@ function baseFromSeedAndSnap() {
   // Нет кэша → считаем сайт открытым (не мигаем заглушкой до ответа сервера).
   // В кэше false только если сервер уже подтверждал выключение.
   const siteEnabled = snap ? snap.siteEnabled !== false : true
+  const settings = settingsFromMeta(
+    {
+      homeNoLessonsText: snap?.homeNoLessonsText ?? seed.homeNoLessonsText,
+      homeNoLessonsUntil: snap?.homeNoLessonsUntil ?? seed.homeNoLessonsUntil,
+      formationAutofill: snap?.formationAutofill ?? seed.formationAutofill,
+      formationAutofillMinutes: snap?.formationAutofillMinutes ?? seed.formationAutofillMinutes,
+      formationAutofillNeedsMarks: snap?.formationAutofillNeedsMarks ?? seed.formationAutofillNeedsMarks,
+      formationFaculties: snap?.formationFaculties?.length ? snap.formationFaculties : seed.formationFaculties,
+      sessionStart: snap?.sessionStart ?? seed.sessionStart,
+      sessionEnd: snap?.sessionEnd ?? seed.sessionEnd,
+      sessionLabel: snap?.sessionLabel ?? seed.sessionLabel,
+    },
+    { ...DEFAULT_SETTINGS },
+  )
   return {
     version: DB_VERSION,
     semesterLabel: snap?.semesterLabel || seed.semesterLabel,
     siteEnabled,
     closedMessage: snap?.closedMessage || 'Сайт временно закрыт. Зайдите позже.',
+    ...settings,
     adminCodeHash: seed.adminCodeHash || '',
     groups: snap?.groups?.length ? snap.groups : seed.groups,
     lessons: snap?.lessons?.length ? snap.lessons : seed.lessons,
+    sessionLessons: snap?.sessionLessons || [],
     homework: snap?.homework || [],
     overrides: snap?.overrides || [],
     news: snap?.news || [],
@@ -645,6 +776,218 @@ export function getLessons(groupId, day) {
 
 export function getOverridesForDate(groupId, dateStr) {
   return db.overrides.filter((o) => o.groupId === groupId && o.date === dateStr)
+}
+
+/* ── Сессионное расписание (дата + время, из Excel) ─────────────────── */
+
+function isoOf(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr || ''))
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : ''
+}
+
+function dowFromIso(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return 0
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0)
+  const js = d.getDay()
+  return js === 0 ? 7 : js
+}
+
+function sessionToLesson(row, dow) {
+  return {
+    id: row.id,
+    groupId: row.groupId,
+    day: dow,
+    start: row.start,
+    end: row.end || row.start,
+    subject: row.subject,
+    teacher: row.teacher || '',
+    room: row.room || '',
+    remote: !!row.remote,
+    weekType: 'every',
+    pair: null,
+    session: true,
+    kind: row.kind || '',
+    date: row.date,
+  }
+}
+
+/** Сессионные пары группы на конкретную дату (уже отсортированные). */
+export function getSessionLessons(groupId, dateStr) {
+  const iso = isoOf(dateStr)
+  if (!iso || !db?.sessionLessons?.length) return []
+  return db.sessionLessons
+    .filter((r) => r.groupId === groupId && r.date === iso)
+    .sort((a, b) => a.start.localeCompare(b.start))
+}
+
+/**
+ * Пары группы на дату: сессионные, если они есть, иначе недельный шаблон.
+ * Именно это должно вызывать расписание — иначе в сессию показывался бы
+ * обычный семестр.
+ */
+export function lessonsForDate(groupId, dateStr) {
+  const iso = isoOf(dateStr)
+  const dow = dowFromIso(iso)
+  const session = getSessionLessons(groupId, iso)
+  if (session.length) return session.map((r) => sessionToLesson(r, dow))
+  if (!dow || dow === 7) return []
+  return getLessons(groupId, dow)
+}
+
+/** Есть ли вообще загруженная сессия (для баннера/подписи). */
+export function getSessionInfo() {
+  const rows = db?.sessionLessons || []
+  if (!rows.length) return { count: 0, start: '', end: '', label: '', batches: [] }
+  const dates = [...new Set(rows.map((r) => r.date).filter(Boolean))].sort()
+  const batches = [...new Set(rows.map((r) => r.batchId).filter(Boolean))]
+  return {
+    count: rows.length,
+    start: dates[0] || '',
+    end: dates[dates.length - 1] || '',
+    label: db?.sessionLabel || '',
+    batches,
+  }
+}
+
+/** Все даты сессионных пар группы — чтобы календарь знал, где точки. */
+export function sessionDatesForGroup(groupId) {
+  const out = new Set()
+  for (const r of db?.sessionLessons || []) {
+    if (r.groupId === groupId && r.date) out.add(r.date)
+  }
+  return out
+}
+
+/* ── Настройки сайта (главная, построения, сессия) ──────────────────── */
+
+export function getAppSettings() {
+  if (!db) return { ...DEFAULT_SETTINGS }
+  return settingsFromMeta(db, { ...DEFAULT_SETTINGS })
+}
+
+/**
+ * Обновить настройки. Требует админ-токен; после успеха локальная копия
+ * обновляется сразу, чтобы UI не ждал перезагрузки.
+ */
+export async function setAppSettings(patch = {}) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token || session.role !== 'admin') throw new Error('Нужен вход админа')
+  const { data, error } = await withTimeout(
+    supabase.rpc('rasp_set_app_settings', { p_token: session.token, p_patch: patch }),
+    15000,
+    'сохранения настроек',
+  )
+  if (error) {
+    const msg = rpcErrorMessage(error)
+    if (/could not find|does not exist|schema cache/i.test(msg)) {
+      throw new Error('На сервере нет настроек v150 — выполни supabase/v150_features.sql в Supabase')
+    }
+    throw new Error(msg)
+  }
+  const meta = parseMetaPayload(data)
+  if (db) {
+    const next = settingsFromMeta(meta, getAppSettings())
+    Object.assign(db, next)
+    saveOfflineSnap(db)
+  }
+  return getAppSettings()
+}
+
+/**
+ * Импорт пачки сессионных пар. rows: [{groupId,date,start,end,subject,teacher,room,kind,remote}]
+ * replace = true — сначала снести всё за эти же даты у этих же групп.
+ */
+export async function importSessionLessons(rows, { replace = true, batch = '', chunkSize = 400 } = {}) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token) throw new Error('Сначала войди')
+  const list = Array.isArray(rows) ? rows : []
+  if (!list.length) throw new Error('Нечего импортировать')
+
+  const size = Math.max(50, Number(chunkSize) || 400)
+  let batchId = String(batch || '').trim()
+  let imported = 0
+  let skipped = 0
+
+  for (let from = 0; from < list.length; from += size) {
+    const chunk = list.slice(from, from + size)
+    const first = from === 0
+    const { data, error } = await withTimeout(
+      supabase.rpc('rasp_import_session', {
+        p_token: session.token,
+        p_batch: batchId || '',
+        p_rows: chunk,
+        // Сносим старое только на первой пачке: иначе следующие удалят
+        // то, что эта же операция только что вставила за те же даты.
+        p_replace: !!replace && first,
+      }),
+      60000,
+      'импорта расписания',
+    )
+    if (error) {
+      const msg = rpcErrorMessage(error)
+      if (/could not find|does not exist|schema cache/i.test(msg)) {
+        throw new Error('На сервере нет таблицы сессии — выполни supabase/v150_features.sql в Supabase')
+      }
+      throw new Error(msg)
+    }
+    let payload = data
+    if (typeof payload === 'string') {
+      try {
+        payload = JSON.parse(payload)
+      } catch {
+        /* keep */
+      }
+    }
+    if (Array.isArray(payload)) payload = payload[0]
+    if (!batchId && payload?.batch) batchId = String(payload.batch)
+    imported += Number(payload?.imported || 0)
+    skipped += Number(payload?.skipped || 0)
+  }
+
+  await refreshSessionLessons()
+  return { imported, skipped, batch: batchId }
+}
+
+/** Откат импорта по batch_id. */
+export async function deleteSessionBatch(batchId) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет связи с сервером')
+  const session = getSession()
+  if (!session?.token) throw new Error('Сначала войди')
+  const id = String(batchId || '').trim()
+  if (!id) throw new Error('Не указана пачка импорта')
+  const { data, error } = await withTimeout(
+    supabase.rpc('rasp_delete_session_batch', { p_token: session.token, p_batch: id }),
+    15000,
+    'отмены импорта',
+  )
+  if (error) throw new Error(rpcErrorMessage(error))
+  let payload = data
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload)
+    } catch {
+      /* keep */
+    }
+  }
+  if (Array.isArray(payload)) payload = payload[0]
+  await refreshSessionLessons()
+  return payload || { deleted: 0 }
+}
+
+/** Перечитать сессионные пары с сервера (после импорта или в фоне). */
+export async function refreshSessionLessons() {
+  if (!supabaseConfigured || !supabase || !db) return 0
+  const { data, error } = await supabase
+    .from('session_lessons')
+    .select('id,group_id,on_date,start_time,end_time,subject,teacher,room,kind,remote,batch_id')
+    .order('on_date', { ascending: true })
+  if (error) return db.sessionLessons?.length || 0
+  db.sessionLessons = (data || []).map(mapSessionRow)
+  saveOfflineSnap(db)
+  return db.sessionLessons.length
 }
 
 function normalizeTeacherKey(s) {
@@ -1726,6 +2069,22 @@ function mapHomeworkRow(h) {
     authorCodeId: h.author_code_id || '',
     authorLabel: h.author_label || '',
     authorAvatarUrl: h.author_avatar_url || '',
+  }
+}
+
+function mapSessionRow(r) {
+  return {
+    id: r.id,
+    groupId: r.group_id || r.groupId,
+    date: r.on_date || r.date || '',
+    start: r.start_time || r.start || '',
+    end: r.end_time || r.end || '',
+    subject: r.subject || '',
+    teacher: r.teacher || '',
+    room: r.room || '',
+    kind: r.kind || '',
+    remote: !!r.remote,
+    batchId: r.batch_id || r.batchId || '',
   }
 }
 
@@ -3044,7 +3403,7 @@ export function getClosedMessage() {
   )
 }
 
-/** Подтянуть флаг «сайт включён» без полной перезагрузки данных. */
+/** Подтянуть флаг «сайт включён» и настройки без полной перезагрузки данных. */
 export async function refreshSiteGate() {
   if (!supabaseConfigured || !supabase) return isSiteEnabled()
   try {
@@ -3053,15 +3412,7 @@ export async function refreshSiteGate() {
       // Сеть моргнула — НЕ переключаем статус (иначе мигает «сайт выключен»).
       return isSiteEnabled()
     }
-    let meta = data
-    if (typeof meta === 'string') {
-      try {
-        meta = JSON.parse(meta)
-      } catch {
-        /* keep */
-      }
-    }
-    if (Array.isArray(meta)) meta = meta[0]
+    const meta = parseMetaPayload(data)
     if (!db) return true
     // Меняем флаг только при явном boolean с сервера.
     if (meta && typeof meta.siteEnabled === 'boolean') db.siteEnabled = meta.siteEnabled
@@ -3070,6 +3421,7 @@ export async function refreshSiteGate() {
       db.closedMessage = meta.closedMessage || meta.closedmessage
     }
     if (meta?.semesterLabel) db.semesterLabel = meta.semesterLabel
+    Object.assign(db, settingsFromMeta(meta, db))
     saveOfflineSnap(db)
     return db.siteEnabled !== false
   } catch {

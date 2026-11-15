@@ -230,6 +230,29 @@ export async function setFormationMark(studentId, date, attendance, comment = ''
   })
 }
 
+/**
+ * Автоотметка «н» на построении. Сервер сам проверяет: включён ли режим,
+ * наступило ли время (первая пара − N минут), сегодняшняя ли дата, есть ли
+ * право записи. Клиент вызывает это при открытии расхода и по таймеру.
+ * @returns {Promise<{filled:number, skipped:string}>}
+ */
+export async function formationAutofill(groupId, date) {
+  const session = getSession()
+  if (!session?.token) return { filled: 0, skipped: 'no_session' }
+  try {
+    const data = await rpc('rasp_formation_autofill', {
+      p_token: session.token,
+      p_group_id: groupId,
+      p_date: date,
+    })
+    const payload = data && typeof data === 'object' ? data : {}
+    return { filled: Number(payload.filled || 0), skipped: String(payload.skipped || '') }
+  } catch (err) {
+    // Нет миграции v150 или нет прав — это не повод ломать экран расхода.
+    return { filled: 0, skipped: 'error', error: err?.message || '' }
+  }
+}
+
 export async function listMyMarks() {
   const session = getSession()
   const rows = await rpc('rasp_my_marks', { p_token: session.token })
