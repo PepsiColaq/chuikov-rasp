@@ -12,32 +12,87 @@
  * по порядку букв → с опечаткой.
  */
 
-/** Латиница, которая на телефоне выглядит как кириллица. */
-const LATIN_TO_CYR = {
-  A: 'А',
-  B: 'В',
-  C: 'С',
-  E: 'Е',
-  H: 'Н',
-  K: 'К',
-  M: 'М',
-  O: 'О',
-  P: 'Р',
-  T: 'Т',
-  X: 'Х',
-  Y: 'У',
+/**
+ * Во что может превратиться латинская буква, если человек набрал группу
+ * в английской раскладке. Часть букв — визуальные двойники (P→Р, C→С),
+ * часть — «на слух» (P→П, D→Д), поэтому кандидатов может быть несколько.
+ */
+const LATIN_CANDIDATES = {
+  A: ['А'],
+  B: ['В', 'Б'],
+  C: ['С'],
+  D: ['Д'],
+  E: ['Е', 'Э'],
+  F: ['Ф'],
+  G: ['Г'],
+  H: ['Н'],
+  I: ['И'],
+  J: ['Й'],
+  K: ['К'],
+  L: ['Л'],
+  M: ['М'],
+  N: ['Н'],
+  O: ['О'],
+  P: ['П', 'Р'],
+  Q: ['К'],
+  R: ['Р'],
+  S: ['С'],
+  T: ['Т'],
+  U: ['У'],
+  V: ['В'],
+  W: ['В'],
+  X: ['Х'],
+  Y: ['У', 'Ю'],
+  Z: ['З'],
 }
 
 /**
  * Ключ для сравнения: «0903-ПД5» → «0903ПД5».
- * Регистр, ё→е, латиница→кириллица, всё лишнее выкинуто.
+ * Регистр, ё→е, латиница → основная кириллическая буква, всё лишнее выкинуто.
+ * Неоднозначные прочтения (p → п или р) разворачивает groupSearchVariants.
  */
 export function groupSearchKey(value) {
   const up = String(value || '')
     .toUpperCase()
     .replace(/Ё/g, 'Е')
-    .replace(/[A-Z]/g, (ch) => LATIN_TO_CYR[ch] || ch)
+    .replace(/[A-Z]/g, (ch) => (LATIN_CANDIDATES[ch] ? LATIN_CANDIDATES[ch][0] : ''))
   return up.replace(/[^0-9А-Я]/g, '')
+}
+
+/**
+ * Все разумные прочтения запроса: «0903-pd5» → ['0903ПД5', '0903РД5'].
+ * Нужно потому, что p — это и «п», и «р», а d — «д».
+ * Вариантов немного: если их слишком много, дальше идём по первым.
+ */
+export function groupSearchVariants(value, maxVariants = 24) {
+  const up = String(value || '').toUpperCase()
+  const chunks = []
+  for (const ch of up) {
+    if (ch === 'Ё') {
+      chunks.push(['Е'])
+      continue
+    }
+    if (/[0-9А-Я]/.test(ch)) {
+      chunks.push([ch])
+      continue
+    }
+    const latin = LATIN_CANDIDATES[ch]
+    if (latin) chunks.push(latin)
+    // Всё остальное (тире, пробелы, точки) просто выкидываем.
+  }
+  if (!chunks.length) return ['']
+
+  let out = ['']
+  for (const options of chunks) {
+    if (out.length * options.length > maxVariants) {
+      out = out.map((prefix) => prefix + options[0])
+      continue
+    }
+    const next = []
+    for (const prefix of out) for (const ch of options) next.push(prefix + ch)
+    out = next
+  }
+  return out
 }
 
 /** Расстояние Левенштейна с ранним выходом, когда разница уже слишком велика. */
@@ -103,13 +158,27 @@ export function courseKeyFromName(name) {
 
 /**
  * Совпадение одного названия с запросом.
+ * @param {string} name
+ * @param {string|string[]} queryKey ключ запроса или несколько прочтений
  * @returns {{score:number, why:'exact'|'prefix'|'inside'|'order'|'typo'}|null}
  *   score: 0 — лучшее, чем больше — тем дальше.
  */
 export function matchScore(name, queryKey) {
-  if (!queryKey) return { score: 0, why: 'exact' }
+  const keys = (Array.isArray(queryKey) ? queryKey : [queryKey]).filter(Boolean)
+  if (!keys.length) return { score: 0, why: 'exact' }
   const key = groupSearchKey(name)
   if (!key) return null
+
+  let best = null
+  for (const qk of keys) {
+    const hit = matchOne(key, qk)
+    if (hit && (!best || hit.score < best.score)) best = hit
+    if (best && best.score === 0) break
+  }
+  return best
+}
+
+function matchOne(key, queryKey) {
   if (key === queryKey) return { score: 0, why: 'exact' }
   if (key.startsWith(queryKey)) return { score: 10, why: 'prefix' }
   const at = key.indexOf(queryKey)
@@ -134,7 +203,7 @@ export function matchScore(name, queryKey) {
  * @returns {Array<{group:object, score:number, why:string}>}
  */
 export function searchGroups(groups, query = '', filters = {}) {
-  const queryKey = groupSearchKey(query)
+  const queryKeys = groupSearchVariants(query)
   const faculty = String(filters.faculty || '').toUpperCase()
   const course = String(filters.course || '').toUpperCase()
 
@@ -144,7 +213,7 @@ export function searchGroups(groups, query = '', filters = {}) {
     const name = String(group.name || '')
     if (faculty && facultyKeyFromName(name) !== faculty) continue
     if (course && courseKeyFromName(name) !== course) continue
-    const hit = matchScore(name, queryKey)
+    const hit = matchScore(name, queryKeys)
     if (!hit) continue
     out.push({ group, score: hit.score, why: hit.why })
   }
@@ -159,23 +228,30 @@ export function searchGroups(groups, query = '', filters = {}) {
 
 /** Первая группа, которая совпала точно (для Enter в поиске). */
 export function pickExactGroup(groups, query = '') {
-  const key = groupSearchKey(query)
-  if (!key) return null
-  const found = (Array.isArray(groups) ? groups : []).find((g) => groupSearchKey(g?.name) === key)
-  return found || null
+  const keys = groupSearchVariants(query).filter(Boolean)
+  if (!keys.length) return null
+  const list = Array.isArray(groups) ? groups : []
+  for (const key of keys) {
+    const found = list.find((g) => groupSearchKey(g?.name) === key)
+    if (found) return found
+  }
+  return null
 }
 
 /** Подсказка «возможно, ты имел в виду» — только когда прямых совпадений нет. */
 export function suggestGroupName(groups, query = '') {
-  const key = groupSearchKey(query)
-  if (key.length < 3) return ''
+  const keys = groupSearchVariants(query).filter((k) => k.length >= 3)
+  if (!keys.length) return ''
   let best = null
   for (const group of Array.isArray(groups) ? groups : []) {
     const name = String(group?.name || '')
     if (!name) continue
-    const d = editDistance(key, groupSearchKey(name), 3)
-    if (d > 3) continue
-    if (!best || d < best.d) best = { name, d }
+    const groupKey = groupSearchKey(name)
+    for (const key of keys) {
+      const d = editDistance(key, groupKey, 3)
+      if (d > 3) continue
+      if (!best || d < best.d) best = { name, d }
+    }
   }
   return best ? best.name : ''
 }

@@ -129,13 +129,7 @@ import {
   fetchStorageObjectUrl,
   checkConnectivity,
 } from './lib/supabase.js'
-import {
-  searchGroups,
-  pickExactGroup,
-  suggestGroupName,
-  listFacultyKeys,
-  listCourseKeys,
-} from './lib/group-match.js'
+import { searchGroups } from './lib/group-match.js'
 import { readXlsx } from './lib/xlsx.js'
 import {
   parseScheduleBook,
@@ -3976,159 +3970,49 @@ function renderOverridesTab(group) {
 }
 
 function renderGroupPicker() {
-  const wrap = el('div', { className: 'panel group-picker' })
+  const wrap = el('div', { className: 'panel' })
   const all = listGroups()
-  const q = el('input', {
-    type: 'search',
-    placeholder: '0903-ПД5 или просто пд5',
-    autocomplete: 'off',
-    autocapitalize: 'characters',
-    spellcheck: 'false',
-    enterKeyHint: 'go',
-  })
+  const q = el('input', { type: 'search', placeholder: 'Поиск группы…' })
   const list = el('div', { className: 'group-list' })
-  const filters = el('div', { className: 'group-filters' })
-  const countLine = el('p', { className: 'muted group-picker-count' })
-  const chosen = { faculty: '', course: '' }
-
-  const paintChips = () => {
-    filters.replaceChildren()
-    const faculties = listFacultyKeys(all)
-    const courses = listCourseKeys(all)
-    if (faculties.length > 1) {
-      filters.append(
-        el(
-          'div',
-          { className: 'group-chip-row' },
-          [['', 'Все']].concat(faculties.map((f) => [f, f])).map(([id, label]) =>
-            el('button', {
-              type: 'button',
-              className: `chip group-chip${chosen.faculty === id ? ' chip-active' : ''}`,
-              text: label,
-              title: id && FACULTY_LABEL[id] ? FACULTY_LABEL[id] : '',
-              onClick: () => {
-                hapticTap()
-                chosen.faculty = chosen.faculty === id ? '' : id
-                paintChips()
-                paint()
-              },
-            }),
-          ),
-        ),
-      )
-    }
-    if (courses.length > 1) {
-      filters.append(
-        el(
-          'div',
-          { className: 'group-chip-row' },
-          [['', 'Все курсы']].concat(courses.map((c) => [c, c])).map(([id, label]) =>
-            el('button', {
-              type: 'button',
-              className: `chip group-chip${chosen.course === id ? ' chip-active' : ''}`,
-              text: label,
-              onClick: () => {
-                hapticTap()
-                chosen.course = chosen.course === id ? '' : id
-                paintChips()
-                paint()
-              },
-            }),
-          ),
-        ),
-      )
-    }
-  }
-
   const paint = () => {
     list.replaceChildren()
     const query = q.value.trim()
-    let hits = searchGroups(all, query, chosen)
-    // Нашлось точное — не заваливаем человека списком «похоже»: оставляем
-    // точное совпадение и пару соседей, чтобы можно было выбрать другое.
-    if (hits.length > 4 && hits[0].why === 'exact') hits = hits.slice(0, 4)
-    countLine.textContent =
-      query || chosen.faculty || chosen.course ? `Найдено: ${hits.length}` : `Групп: ${all.length}`
-
-    if (!hits.length) {
-      const guess = suggestGroupName(all, query)
-      const guessId = guess ? findGroupByName(guess)?.id : ''
-      list.append(
-        el('div', { className: 'group-empty' }, [
-          el('p', { className: 'group-empty-title', text: 'Ничего не нашли' }),
-          el('p', {
-            className: 'muted',
-            text: query
-              ? 'Проверь номер: обычно это 0903-ПД5. Тире можно не ставить.'
-              : 'Попробуй снять фильтры выше.',
-          }),
-          guessId
-            ? el('button', {
-                type: 'button',
-                className: 'btn secondary',
-                text: `Может, это ${guess}?`,
-                onClick: (e) => pickGroupWithFeel(guessId, e.currentTarget),
-              })
-            : null,
-        ]),
-      )
-      return
+    // Список — как раньше, но фильтр идёт по нормализованному ключу:
+    // «0903пд5», «0903 пд 5», «0903-pd5» находят «0903-ПД5».
+    let hits = query ? searchGroups(all, query) : []
+    if (query) {
+      // Сначала только те, где ключ запроса реально есть внутри названия.
+      // «Похожие по опечатке» подмешиваем лишь если точных не нашлось.
+      const strong = hits.filter((h) => h.why === 'exact' || h.why === 'prefix' || h.why === 'inside')
+      if (strong.length) hits = strong
     }
-
-    for (const hit of hits) {
-      const g = hit.group
-      const badge = hit.why === 'exact' ? 'точное' : hit.why === 'typo' ? 'похоже' : ''
+    const rows = query ? hits.map((hit) => hit.group) : all
+    for (const g of rows) {
       list.append(
         el(
           'button',
           {
             type: 'button',
-            className: `group-pick-btn group-hit-${hit.why}`,
+            className: 'group-pick-btn',
             onClick: (e) => pickGroupWithFeel(g.id, e.currentTarget),
           },
           [
-            el('span', { className: 'group-pick-main' }, [
-              el('strong', { text: g.name }),
-              el('span', {
-                text: g.faculty ? FACULTY_LABEL[g.faculty] || `Факультет ${g.faculty}` : ' ',
-              }),
-            ]),
-            badge ? el('span', { className: 'group-pick-badge', text: badge }) : null,
+            el('strong', { text: g.name }),
+            el('span', { text: g.faculty ? `Факультет ${g.faculty}` : ' ' }),
           ],
         ),
       )
     }
-
-    // Всё «похоже», а точного нет — даём явную подсказку, чтобы не гадать.
-    if (query && hits.length && hits[0].why === 'typo') {
-      list.prepend(
-        el('p', {
-          className: 'group-typo-hint',
-          text: `Точного «${query}» нет. Ближе всего:`,
-        }),
-      )
-    }
   }
-
   q.addEventListener('input', paint)
-  q.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return
-    e.preventDefault()
-    const target = pickExactGroup(all, q.value) || searchGroups(all, q.value, chosen)[0]?.group
-    if (target) pickGroupWithFeel(target.id, null)
-  })
-
-  paintChips()
   paint()
   wrap.append(
     el('p', {
       className: 'muted',
       style: 'margin:0 0 10px',
-      text: 'Начни набирать номер — тире, регистр и пара опечаток не важны. Если нажал случайно — «Назад» справа сверху.',
+      text: 'Выбери свою группу. Если нажал случайно — «Назад» справа сверху.',
     }),
     el('div', { className: 'search' }, [q]),
-    filters,
-    countLine,
     list,
   )
   return wrap
@@ -11884,7 +11768,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=150`, { scope: base })
+    .register(`${base}sw.js?v=151`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
