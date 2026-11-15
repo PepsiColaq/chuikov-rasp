@@ -10,7 +10,8 @@
   "news": "features/news.js",
   "programs": "features/programs.js",
   "more": "screens/more.js",
-  "time": "lib/time.js"
+  "time": "lib/time.js",
+  "directory": "screens/directory.js"
  },
  "names": {
   "UI_MOTION": "./lib/ui-feedback.js",
@@ -207,6 +208,15 @@
   "stripIds": "./lib/time.js",
   "roleRu": "./lib/time.js",
   "daySwapPanelClass": "./lib/time.js",
-  "isPageReload": "./lib/time.js"
+  "isPageReload": "./lib/time.js",
+  "roomLink": "./screens/directory.js",
+  "renderTeacherSlotCard": "./screens/directory.js",
+  "renderTeachersTab": "./screens/directory.js",
+  "renderRoomSearch": "./screens/directory.js",
+  "buildRoomResultsNodes": "./screens/directory.js",
+  "renderRoomSlotCard": "./screens/directory.js",
+  "renderTeacherSearch": "./screens/directory.js",
+  "buildTeacherResultsNodes": "./screens/directory.js",
+  "resolveFreeRoomsSlotKey": "./screens/directory.js"
  }
 }
