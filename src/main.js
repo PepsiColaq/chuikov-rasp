@@ -9673,7 +9673,9 @@ function attachCardSwipe({ viewport, track, count, index, slot, goTo, onClose, l
   viewport.addEventListener('pointermove', move)
   viewport.addEventListener('pointerup', end)
   viewport.addEventListener('pointercancel', end)
-  // Второй палец — это уже зум фото, ленту в этот момент не листаем.
+  // Два пальца — не листаем событие: чаще всего это случайное касание
+  // или попытка приблизить фото. Само приближение живёт в полноэкранном
+  // просмотре, который открывается тапом по снимку.
   viewport.addEventListener(
     'touchstart',
     (e) => {
