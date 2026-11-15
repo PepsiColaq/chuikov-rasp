@@ -12,8 +12,11 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const secretPath = join(root, 'scripts', '.tg-webhook-secret.txt')
 
-const BOT_TOKEN = process.env.TG_BOT_TOKEN || 'BOT_TOKEN_REMOVED'
-const ADMIN = process.env.TG_ADMIN_CHAT_ID || 'ADMIN_CHAT_ID_REMOVED'
+// Секреты НЕ храним в репозитории: он публичный.
+// Токен бота берём только из окружения.
+//   PowerShell:  $env:TG_BOT_TOKEN="..."; $env:TG_ADMIN_CHAT_ID="..."; node scripts/deploy-tg-worker.mjs
+const BOT_TOKEN = process.env.TG_BOT_TOKEN || ''
+const ADMIN = process.env.TG_ADMIN_CHAT_ID || ''
 const SB_URL = process.env.SUPABASE_URL || 'https://azuergqxvqrkvrvqelha.supabase.co'
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
@@ -23,6 +26,14 @@ if (!secret) {
   writeFileSync(secretPath, secret, 'utf8')
 }
 
+if (!BOT_TOKEN) {
+  console.error('Нет токена бота. Задай переменную окружения TG_BOT_TOKEN (токен из @BotFather).')
+  process.exit(1)
+}
+if (!ADMIN) {
+  console.error('Нет id админ-чата. Задай переменную окружения TG_ADMIN_CHAT_ID.')
+  process.exit(1)
+}
 if (!SB_KEY) {
   console.error('Set SUPABASE_SERVICE_ROLE_KEY in env')
   process.exit(1)
