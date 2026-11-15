@@ -1,8 +1,13 @@
 name: Deploy to GitHub Pages
 
-# Сборка и публикация сайта через GitHub Actions.
-# Зачем: встроенная (legacy) сборка Pages падала с «Page build failed»
-# и зависала в статусе building — файлы при этом были корректные.
+# Сборка и публикация сайта при пуше в main.
+#
+# Почему публикуем в ветку gh-pages, а не через actions/deploy-pages:
+# в настройках репозитория источник Pages — ветка gh-pages, а у окружения
+# github-pages политика веток разрешает деплой только из неё. Job deploy
+# при публикации из main падал за пару секунд без единого шага.
+# Поэтому здесь повторяем то, что делает `npm run deploy` (gh-pages -d dist):
+# собираем и force-пушим содержимое dist в gh-pages.
 
 on:
   push:
@@ -10,16 +15,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,16 +48,16 @@ jobs:
       - name: Add .nojekyll
         run: touch dist/.nojekyll
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish to gh-pages
+        run: |
+          cd dist
+          git init -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "deploy ${GITHUB_SHA::7}"
+          git push --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
