@@ -11,6 +11,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import * as acorn from 'acorn'
+import { refreshHub } from './hub-block.mjs'
 
 const ROOT = process.cwd()
 const MAIN = path.join(ROOT, 'src/main.js')
@@ -42,62 +43,6 @@ const MODULE_KEY = (() => {
   const i = args.indexOf('--module')
   return i >= 0 ? args[i + 1] : null
 })()
-
-if (INIT_HUB) {
-  // Одноразовая операция: подключить мост в main.js и зарегистрировать в нём функции.
-  const { src, ast } = parse(MAIN)
-  const HUB_FNS = [
-    'render', 'refreshTabPanes', 'softRefreshCurrentTab', 'redrawAfterData',
-    'switchTab', 'gotoTab', 'openMoreScreen', 'openProgramScreen',
-    'softUpdateNav', 'softUpdateTopLead', 'withTabScrollPreserved',
-    'resetWindowScroll', 'openImageCropEditor', 'renderAdminPanel',
-    'renderAdminFreeRooms', 'renderOverrideForm', 'renderOverridesTab',
-    'renderGroupPicker', 'wrapAdminAcc', 'renderHomeTextSettings',
-    'renderFormationSettings', 'renderSessionSettings', 'renderScheduleImport',
-    'renderAuditSection', 'renderLegalDoc', 'renderMoreSupport',
-    'renderProfileAvatarControls', 'renderPrograms', 'openProgramReader',
-    'renderProgramEditor', 'renderHome', 'renderHomeHero', 'renderNewsComposer',
-    'renderHomeNow', 'renderTabBody', 'renderStudyTab', 'openNewsReader',
-    'openGroupPicker', 'selectGroup', 'confirmAndLogout', 'renderBannedGate',
-    'renderClosedGate', 'renderNav', 'renderDays', 'renderSchedule',
-    'renderLessonCard', 'renderHwTab', 'renderHwCard', 'renderFormationCard',
-    'renderMore', 'renderMoreV2', 'renderMoreClassic', 'renderMoreStudents',
-    'renderMoreMyCode', 'renderMoreContacts', 'renderMoreOverrides',
-    'renderMoreGroup', 'renderMoreV2', 'renderTeachersTab', 'renderRoomSearch',
-    'renderTeacherSearch', 'renderTop', 'renderMonthCalendar', 'renderNowStrip',
-    'openHwLightbox', 'closeHwLightbox', 'renderHwAttachments',
-    'renderInstallCard', 'setInstallHelpOpen', 'paintStaffCard',
-    'renderAddHwInline', 'renderInlineHwGroups', 'renderFormationMarksOverlay',
-    'maybeSeekHwDay', 'cancelGroupPicker', 'pickGroupWithFeel',
-    'renderGroupPicker', 'isHwView', 'homeProgramKind', 'programGroupId',
-  ]
-
-  const declared = new Set()
-  for (const n of ast.body) {
-    if (n.type === 'FunctionDeclaration') declared.add(n.id.name)
-    if (n.type === 'VariableDeclaration')
-      for (const d of n.declarations) if (d.id.type === 'Identifier') declared.add(d.id.name)
-  }
-  const present = [...new Set(HUB_FNS)].filter((n) => declared.has(n))
-
-  const lastImportEnd = ast.body.filter((n) => n.type === 'ImportDeclaration').pop().end
-  const block =
-    `\nimport { wireHub } from './app/hub.js'` +
-    `\n\n// Отдаём вынесенным модулям функции, которые остаются здесь.\n` +
-    `// До этого вызова в hub лежат пустышки — модули не падают, а просто ничего не делают.\n` +
-    `wireHub({ ${present.sort().join(', ')} })`
-  const out = src.slice(0, lastImportEnd) + block + src.slice(lastImportEnd)
-
-  if (DRY) {
-    console.log('Функции для моста:', present.length)
-    console.log(present.sort().join(', '))
-    process.exit(0)
-  }
-  fs.writeFileSync(MAIN, out)
-  console.log(`✓ Мост подключён, функций: ${present.length}`)
-  process.exit(0)
-}
-
 
 function parse(file) {
   const src = fs.readFileSync(file, 'utf8')
@@ -311,7 +256,7 @@ if (unresolved.size) {
     process.exit(1)
   }
   // viaHub: функция остаётся в main.js, а модуль зовёт её через мост
-  for (const n of unresolved.keys()) hubNames.add(n)
+  for (const n of unresolved.keys()) if (!internal.has(n)) hubNames.add(n)
 }
 
 // ── собираем текст модуля
@@ -374,9 +319,15 @@ for (const name of cfg.names) {
   )
   if (withExport !== text) parts.push(withExport)
   else if (d.kind === 'let' || d.kind === 'var') {
-    // изменяемые переменные не выносим: им присваивают из main.js, а импортированной
-    // переменной присвоить нельзя — пришлось бы городить сеттеры на каждый чих
-    throw new Error(`${name} объявлена как ${d.kind} и переприсваивается — оставь её в main.js`)
+    // Изменяемую переменную можно перенести, только если она никому снаружи не нужна.
+    // Иначе main.js пришлось бы присваивать импортированной переменной — так нельзя.
+    if (!internal.has(name)) {
+      throw new Error(
+        `${name} объявлена как ${d.kind}: добавь её в internal модуля (если она нужна только внутри) ` +
+          `или оставь в main.js`
+      )
+    }
+    parts.push(text)
   } else if (d.kind === 'const') parts.push(text.replace(/^const\s/m, 'export const '))
   else if (d.kind === 'class') parts.push(text.replace(/^class\s/m, 'export class '))
   else throw new Error('Не понял, как экспортировать ' + name)
@@ -523,27 +474,18 @@ const injectLines = Object.entries(inject)
 const ast2 = acorn.parse(newMain, { ecmaVersion: 'latest', sourceType: 'module' })
 const lastImportEnd = ast2.body.filter((n) => n.type === 'ImportDeclaration').pop().end
 
-// viaHub: импорт wireHub + регистрация настоящих функций из main.js
-let hubImportLine = ''
-let hubWireBlock = ''
-if (hubNames.size) {
-  hubImportLine = `import { wireHub } from './app/hub.js'`
-  const sorted = [...hubNames].sort()
-  hubWireBlock =
-    '\n\n// Отдаём вынесенным модулям функции, которые остались здесь\n' +
-    `wireHub({ ${sorted.join(', ')} })`
-}
-
 const finalMain =
   newMain.slice(0, lastImportEnd) +
   '\n' +
   importLine +
-  (hubImportLine ? '\n' + hubImportLine : '') +
   (injectLines ? '\n\n// Внедряем функции из main.js в вынесенный модуль\n' + injectLines : '') +
-  hubWireBlock +
   newMain.slice(lastImportEnd)
 
 fs.writeFileSync(MAIN, finalMain)
+
+// Пересобираем блок моста: часть функций уехала в модуль, и старый wireHub()
+// стал бы ссылаться на несуществующие имена.
+refreshHub()
 
 // ── дополняем app/hub.js новыми именами, чтобы у них были пустышки до wireHub
 if (hubNames.size) {

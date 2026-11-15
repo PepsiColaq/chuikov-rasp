@@ -17,6 +17,23 @@
 const noop = () => {}
 
 export const hub = {
+  calendarDateForWeekday: noop,
+  canEdit: noop,
+  dateForWeekday: noop,
+  daySwapPanelClass: noop,
+  facultyFromName: noop,
+  formatDateRu: noop,
+  formationLoadKey: noop,
+  hhmmToMinutes: noop,
+  humanMins: noop,
+  initialDataLoading: noop,
+  nowMinutesOfDay: noop,
+  roomLink: noop,
+  shortSubjectLabel: noop,
+  subtractMinutes: noop,
+  todayISO: noop,
+  weekRangeLabel: noop,
+  weekdayNumFromIso: noop,
   cancelGroupPicker: noop,
   confirmAndLogout: noop,
   gotoTab: noop,

@@ -141,5 +141,46 @@
    "hwLightboxEl",
    "hwLightboxKeyHandler"
   ]
+ },
+ "schedule": {
+  "file": "screens/schedule.js",
+  "viaHub": true,
+  "header": "// Экран «Расписание»: день, неделя, календарь на месяц и построение.\n//\n// Самый крупный экран приложения. Вынесен вместе с построением\n// (это часть того же экрана, а не отдельная фича).\n//\n// Функции ядра (render, переход по вкладкам, обновление панелей) зовутся\n// через мост app/hub.js — иначе получился бы циклический импорт.",
+  "names": [
+   "getScheduleNowStatus",
+   "overrideIsActiveForList",
+   "dueDateForNextLesson",
+   "ensureOverrideDraft",
+   "renderNowStrip",
+   "renderDays",
+   "lessonMeta",
+   "renderAddHwInline",
+   "hwAuthorKey",
+   "groupHomeworkByAuthor",
+   "renderInlineHwGroups",
+   "renderLessonCard",
+   "isFormationSkipHw",
+   "isLessonInPerson",
+   "facultyOfGroup",
+   "groupHasFormation",
+   "resolveFormation",
+   "renderFormationCard",
+   "loadFormationDay",
+   "renderFormationMarksOverlay",
+   "paintFormationTools",
+   "paintFormationRows",
+   "renderSchedule",
+   "renderMonthCalendar",
+   "renderHwTab",
+   "isHwView",
+   "maybeSeekHwDay",
+   "renderHwToggleAvatar",
+   "renderAuthorChip",
+   "linkifyHwText",
+   "renderHwCard"
+  ],
+  "internal": [
+   "formationLoadKey"
+  ]
  }
 }
