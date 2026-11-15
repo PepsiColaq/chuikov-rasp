@@ -2,7 +2,8 @@
  "modules": {
   "ui": "lib/ui-feedback.js",
   "constants": "lib/constants.js",
-  "state": "lib/app-state.js"
+  "state": "lib/app-state.js",
+  "install": "lib/install.js"
  },
  "names": {
   "UI_MOTION": "./lib/ui-feedback.js",
@@ -46,6 +47,15 @@
   "WEEK_MAX": "./lib/app-state.js",
   "splashStartedAt": "./lib/app-state.js",
   "state": "./lib/app-state.js",
-  "applyTheme": "./lib/app-state.js"
+  "applyTheme": "./lib/app-state.js",
+  "isStandaloneApp": "./lib/install.js",
+  "isIosDevice": "./lib/install.js",
+  "isAndroidDevice": "./lib/install.js",
+  "tryNativeInstall": "./lib/install.js",
+  "installStepsNode": "./lib/install.js",
+  "setInstallHelpOpen": "./lib/install.js",
+  "renderInstallCard": "./lib/install.js",
+  "deferredInstallPrompt": "./lib/install.js",
+  "installPromptReady": "./lib/install.js"
  }
 }

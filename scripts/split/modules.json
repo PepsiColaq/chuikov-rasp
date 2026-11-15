@@ -82,6 +82,11 @@
   "internal": [
    "deferredInstallPrompt",
    "installPromptReady"
+  ],
+  "glue": [
+   {
+    "text": "if (typeof window !== 'undefined') {\n  window.addEventListener('beforeinstallprompt', (e) => {\n    e.preventDefault()\n    deferredInstallPrompt = e\n    installPromptReady = true\n  })\n  window.addEventListener('appinstalled', () => {\n    deferredInstallPrompt = null\n    installPromptReady = false\n    state.showInstallHelp = false\n    flash('Ярлык добавлен на экран')\n  })\n}"
+   }
   ]
  },
  "time": {
