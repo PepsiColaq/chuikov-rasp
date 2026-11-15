@@ -36,17 +36,21 @@ export const HUB_FNS = [
 /** Возвращает текст блока моста для данного исходника main.js. */
 export function buildHubBlock(src) {
   const ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module' })
-  const declared = new Set()
+  const available = new Set()
   for (const n of ast.body) {
-    if (n.type === 'FunctionDeclaration') declared.add(n.id.name)
+    if (n.type === 'FunctionDeclaration') available.add(n.id.name)
     if (n.type === 'VariableDeclaration')
-      for (const d of n.declarations) if (d.id.type === 'Identifier') declared.add(d.id.name)
+      for (const d of n.declarations) if (d.id.type === 'Identifier') available.add(d.id.name)
+    // функции, уехавшие в модули, main.js импортирует — их тоже отдаём через мост
+    if (n.type === 'ImportDeclaration')
+      for (const sp of n.specifiers) if (sp.local) available.add(sp.local.name)
   }
-  const present = [...new Set(HUB_FNS)].filter((n) => declared.has(n)).sort()
+  const present = [...new Set(HUB_FNS)].filter((n) => available.has(n)).sort()
   if (!present.length) return ''
   return (
     `\nimport { wireHub } from './app/hub.js'` +
-    `\n\n// Отдаём вынесенным модулям функции, которые остаются здесь.\n` +
+    `\n\n// Отдаём вынесенным модулям функции ядра.\n` +
+    `// Часть из них объявлена здесь, часть уже живёт в модулях (поэтому они в импортах).\n` +
     `// До этого вызова в hub лежат пустышки — модули не падают, а просто ничего не делают.\n` +
     `wireHub({ ${present.join(', ')} })`
   )

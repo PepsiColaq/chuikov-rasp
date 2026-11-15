@@ -91,7 +91,7 @@
  },
  "time": {
   "file": "lib/time.js",
-  "header": "// Работа с датой и временем: «сейчас идёт», «через 20 минут»,\n// границы недели, формат «14 ноября».\n//\n// Много мест, где раньше считали минуты вручную — теперь одна функция\n// на каждый случай, чтобы не расходились форматы.",
+  "header": "// Дата, время, подписи: «сейчас идёт», «через 20 минут», границы недели,\n// формат «14 ноября», сокращения ФИО и телефонов.\n//\n// Всё это раньше было разбросано по main.js между экранами. Одна функция\n// на каждый случай — чтобы форматы не расходились между вкладками.",
   "names": [
    "todayISO",
    "hhmmToMinutes",
@@ -109,15 +109,14 @@
    "normalizeSuggestKey",
    "formatPhone",
    "relativeTime",
-   "formatNewsDate",
    "shortPersonName",
    "typeLabel",
    "teacherDateLabel",
    "auditDate",
-   "auditWhen",
-   "auditGroupName",
    "stripIds",
-   "roleRu"
+   "roleRu",
+   "daySwapPanelClass",
+   "isPageReload"
   ]
  },
  "lightbox": {
@@ -293,6 +292,68 @@
    "renderProfileAvatarControls",
    "loadImageFromFile",
    "openImageCropEditor"
+  ]
+ },
+ "directory": {
+  "file": "screens/directory.js",
+  "viaHub": true,
+  "header": "// Вкладка «Справочник»: поиск преподавателя или свободной аудитории\n// по дате и паре.\n//\n// Два режима в одном экране: по преподавателю и по аудитории. Результаты\n// собираются отдельными функциями, чтобы не дублировать разметку.",
+  "names": [
+   "roomLink",
+   "renderTeacherSlotCard",
+   "renderTeachersTab",
+   "renderRoomSearch",
+   "buildRoomResultsNodes",
+   "renderRoomSlotCard",
+   "renderTeacherSearch",
+   "buildTeacherResultsNodes",
+   "resolveFreeRoomsSlotKey"
+  ]
+ },
+ "navigation": {
+  "file": "app/navigation.js",
+  "viaHub": true,
+  "header": "// Нижнее меню, пять вкладок и свайпы между ними.\n//\n// Все вкладки всегда в DOM (pager): свайп только двигает transform,\n// ничего не пересобирая заново. Поэтому тут и переключение, и жесты, и\n// сохранение прокрутки внутри панели.",
+  "names": [
+   "tabLeadText",
+   "tabSwitchShieldUntil",
+   "pagerWidth",
+   "pagerIndex",
+   "getPagerTrack",
+   "sizePagerPanes",
+   "pagerSetX",
+   "pagerSnapToIndex",
+   "buildPersistentPager",
+   "paneTabId",
+   "refreshTabPanes",
+   "softRefreshCurrentTab",
+   "redrawAfterData",
+   "journalCtx",
+   "switchTab",
+   "gotoTab",
+   "openMoreScreen",
+   "swipe",
+   "swipeResetFlags",
+   "swipeCanStart",
+   "swipeAbort",
+   "swipeApplyOffset",
+   "swipeFinish",
+   "withTabScrollPreserved",
+   "resetWindowScroll",
+   "readPaneScroll",
+   "restorePaneScroll",
+   "softUpdateNav",
+   "softUpdateTopLead",
+   "renderTabBody",
+   "renderStudyTab",
+   "renderTop",
+   "selectGroup",
+   "pickGroupWithFeel",
+   "openGroupPicker",
+   "cancelGroupPicker",
+   "confirmAndLogout",
+   "sessionPillText",
+   "programsLoaded"
   ]
  }
 }

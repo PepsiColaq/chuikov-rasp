@@ -148,11 +148,13 @@ import { auditCard, auditGroupName, auditSnapshot, auditTitle, auditWhen, downlo
 import { attachCardSwipe, canWriteNews, createReaderShell, formatNewsDate, homeNoLessonsText, homeProgramKind, listFaculties, lockReaderScroll, mountReaderCards, openNewsReader, renderHome, renderHomeHero, renderHomeNow, renderNewsComposer, scrollReaderTo, splitNewsMedia, startHeroAutoSlide, syncComposeToggle, unlockReaderScroll } from './features/news.js'
 import { canManagePrograms, emptyProgramDraft, openProgramReader, programGroupId, programImages, programMetaLine, programVideoSrc, renderProgramEditor, renderPrograms } from './features/programs.js'
 import { clearCascadeAnim, loadImageFromFile, moreSettingsRow, moreSvg, moreThemeIcon, openImageCropEditor, openProgramScreen, paintStaffCard, renderBannedGate, renderCabinetCard, renderClosedGate, renderMore, renderMoreClassic, renderMoreContacts, renderMoreGroup, renderMoreMyCode, renderMoreOverrides, renderMoreStudents, renderMoreSupport, renderMoreV2, renderNav, renderProfileAvatarControls, tabSwitchShieldActive } from './screens/more.js'
+import { auditDate, calendarDateForWeekday, canEdit, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, hhmmToMinutes, humanMins, isPageReload, normalizeSuggestKey, nowMinutesOfDay, relativeTime, roleRu, shortPersonName, shortSubjectLabel, stripIds, subtractMinutes, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso } from './lib/time.js'
 import { wireHub } from './app/hub.js'
 
-// Отдаём вынесенным модулям функции, которые остаются здесь.
+// Отдаём вынесенным модулям функции ядра.
+// Часть из них объявлена здесь, часть уже живёт в модулях (поэтому они в импортах).
 // До этого вызова в hub лежат пустышки — модули не падают, а просто ничего не делают.
-wireHub({ calendarDateForWeekday, canEdit, cancelGroupPicker, confirmAndLogout, dateForWeekday, daySwapPanelClass, formatDateRu, gotoTab, hhmmToMinutes, humanMins, initialDataLoading, nowMinutesOfDay, openGroupPicker, openMoreScreen, pickGroupWithFeel, redrawAfterData, refreshTabPanes, render, renderRoomSearch, renderStudyTab, renderTabBody, renderTeacherSearch, renderTeachersTab, renderTop, resetWindowScroll, roomLink, selectGroup, shortSubjectLabel, softRefreshCurrentTab, softUpdateNav, softUpdateTopLead, subtractMinutes, switchTab, todayISO, weekRangeLabel, weekdayFromISO, weekdayNumFromIso, withTabScrollPreserved })
+wireHub({ calendarDateForWeekday, canEdit, cancelGroupPicker, closeHwLightbox, confirmAndLogout, dateForWeekday, daySwapPanelClass, formatDateRu, gotoTab, hhmmToMinutes, homeProgramKind, humanMins, initialDataLoading, isHwView, maybeSeekHwDay, nowMinutesOfDay, openGroupPicker, openHwLightbox, openImageCropEditor, openMoreScreen, openNewsReader, openProgramReader, openProgramScreen, paintStaffCard, pickGroupWithFeel, programGroupId, redrawAfterData, refreshTabPanes, render, renderAddHwInline, renderAdminFreeRooms, renderAdminPanel, renderAuditSection, renderBannedGate, renderClosedGate, renderDays, renderFormationCard, renderFormationMarksOverlay, renderFormationSettings, renderGradesTab, renderGroupPicker, renderHome, renderHomeHero, renderHomeNow, renderHomeTextSettings, renderHwAttachments, renderHwCard, renderHwTab, renderInlineHwGroups, renderInstallCard, renderJournalOverlay, renderLegalDoc, renderLessonCard, renderMonthCalendar, renderMore, renderMoreClassic, renderMoreContacts, renderMoreGroup, renderMoreMyCode, renderMoreOverrides, renderMoreStudents, renderMoreSupport, renderMoreV2, renderNav, renderNewsComposer, renderNowStrip, renderOverrideForm, renderOverridesTab, renderProfileAvatarControls, renderProgramEditor, renderPrograms, renderRoomSearch, renderSchedule, renderScheduleImport, renderSessionSettings, renderStudentsScreen, renderStudyTab, renderTabBody, renderTeacherSearch, renderTeachersTab, renderTop, resetWindowScroll, roomLink, selectGroup, setInstallHelpOpen, shortSubjectLabel, softRefreshCurrentTab, softUpdateNav, softUpdateTopLead, subtractMinutes, switchTab, todayISO, weekRangeLabel, weekdayFromISO, weekdayNumFromIso, withTabScrollPreserved, wrapAdminAcc })
 
 
 // Внедряем функции из main.js в вынесенный модуль
@@ -166,96 +168,6 @@ function normalizePeopleQuery(s) {
     .replace(/ё/g, 'е')
     .replace(/\s+/g, ' ')
     .trim()
-}
-
-function todayISO() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-/** «09:00» → минуты от полуночи */
-function hhmmToMinutes(hhmm) {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim())
-  if (!m) return null
-  return Number(m[1]) * 60 + Number(m[2])
-}
-
-function nowMinutesOfDay() {
-  const n = new Date()
-  return n.getHours() * 60 + n.getMinutes()
-}
-
-function shortSubjectLabel(name, max = 36) {
-  const s = String(name || '').trim()
-  if (s.length <= max) return s
-  return `${s.slice(0, Math.max(1, max - 1)).trim()}…`
-}
-
-/** «7 мин» / «2 ч 10 мин» — минуты в скобках не читаются, часы понятнее. */
-function humanMins(total) {
-  const m = Math.max(0, Math.round(Number(total) || 0))
-  if (m < 1) return 'меньше минуты'
-  if (m < 60) return `${m} мин`
-  const h = Math.floor(m / 60)
-  const rest = m % 60
-  return rest ? `${h} ч ${rest} мин` : `${h} ч`
-}
-
-/** Дата дня недели с учётом сдвига недель UI (0 = эта, -1 = прошлая, +1 = следующая). */
-function dateForWeekday(dayNum, offset = state.weekOffset) {
-  const now = new Date()
-  const jsDay = now.getDay() || 7
-  const d = new Date(now)
-  d.setHours(12, 0, 0, 0)
-  d.setDate(now.getDate() + (Number(dayNum) - jsDay) + Number(offset) * 7)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-/** Дата дня недели относительно календарной «этой» недели (не зависит от weekOffset в UI). */
-function calendarDateForWeekday(dayNum, weekFromToday = 0) {
-  return dateForWeekday(dayNum, weekFromToday)
-}
-
-/** Вычесть минуты из «HH:MM». */
-function subtractMinutes(hhmm, mins) {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim())
-  if (!m) return ''
-  let total = Number(m[1]) * 60 + Number(m[2]) - Number(mins)
-  if (!Number.isFinite(total) || total < 0) total = 0
-  const h = Math.floor(total / 60)
-  const mi = total % 60
-  return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`
-}
-
-function weekRangeLabel() {
-  const mon = formatDateRu(dateForWeekday(1))
-  const end = formatDateRu(dateForWeekday(5))
-  if (state.weekOffset === 0) return `Эта неделя · ${mon}–${end}`
-  if (state.weekOffset === -1) return `Прошлая · ${mon}–${end}`
-  if (state.weekOffset === 1) return `Следующая · ${mon}–${end}`
-  if (state.weekOffset < 0) return `−${Math.abs(state.weekOffset)} нед. · ${mon}–${end}`
-  return `+${state.weekOffset} нед. · ${mon}–${end}`
-}
-
-/** Show dates as ДД.ММ.ГГГГ (storage stays YYYY-MM-DD). */
-function formatDateRu(iso) {
-  if (!iso) return ''
-  const s = String(iso).slice(0, 10)
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
-  if (m) return `${m[3]}.${m[2]}.${m[1]}`
-  const m2 = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s)
-  if (m2) return s
-  return s
-}
-
-function canEdit(groupId) {
-  const s = getSession()
-  if (!s) return false
-  if (s.role === 'admin') return true
-  // Куратор ведёт свои группы (или все, если groupId пустой) — как староста.
-  if (s.role === 'curator') return !s.groupId || s.groupId === groupId
-  if (s.role === 'starosta' && s.allGroups) return true
-  return s.role === 'starosta' && s.groupId === groupId
 }
 
 function selectGroup(id) {
@@ -300,31 +212,6 @@ function cancelGroupPicker() {
     localStorage.setItem(SELECTED_GROUP_KEY, backId)
   }
   render()
-}
-
-function typeLabel(t) {
-  return (
-    {
-      room_only: 'Смена кабинета',
-      subject: 'Другая пара',
-      subject_and_room: 'Другая пара + кабинет',
-      cancelled: 'Пары не будет',
-    }[t] || t
-  )
-}
-
-function shortPersonName(full) {
-  const parts = String(full || '')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-  if (parts.length < 2) return String(full || '').trim()
-  const initials = parts
-    .slice(1)
-    .map((part) => part[0])
-    .filter(Boolean)
-    .join('. ')
-  return initials ? `${parts[0]} ${initials}.` : parts[0]
 }
 
 function sessionPillText(session) {
@@ -430,15 +317,6 @@ function roomLink(room) {
       gotoTab('teachers', { animate: true })
     },
   })
-}
-
-function weekdayNumFromIso(iso) {
-  const s = String(iso || '').slice(0, 10)
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
-  if (!m) return 0
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0, 0)
-  const js = d.getDay()
-  return js === 0 ? 7 : js
 }
 
 function renderTeacherSlotCard(s) {
@@ -763,11 +641,6 @@ function renderTeacherSearch() {
   return panel
 }
 
-function teacherDateLabel(dateStr) {
-  const dayOfDate = weekdayFromISO(dateStr)
-  return dayOfDate ? `Дата (${DAY_NAMES[dayOfDate] || ''})` : 'Дата'
-}
-
 function buildTeacherResultsNodes(input, dateInput, paintResults) {
   const q = (state.teacherQuery || '').trim()
   const dateStr = state.teacherDate || todayISO()
@@ -865,24 +738,6 @@ function buildTeacherResultsNodes(input, dateInput, paintResults) {
   return nodes
 }
 
-function normalizeSuggestKey(s) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/ё/g, 'е')
-    .replace(/[.\s]+/g, ' ')
-    .trim()
-}
-
-function weekdayFromISO(iso) {
-  if (!iso) return null
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).slice(0, 10))
-  if (!m) return null
-  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-  if (Number.isNaN(dt.getTime())) return null
-  const js = dt.getDay() // 0=вс … 6=сб
-  return js === 0 ? 7 : js
-}
-
 function resolveFreeRoomsSlotKey(dateStr, preferred) {
   const slots = listDayPairSlots(dateStr)
   if (!slots.length) return ''
@@ -920,70 +775,13 @@ function resolveFreeRoomsSlotKey(dateStr, preferred) {
    и какая оценка. Всё, что не удалось разобрать по известному формату,
    показывается человеческой фразой, а не сырой строкой из базы. */
 
-function roleRu(role) {
-  return ROLE_RU[String(role || '').toLowerCase()] || String(role || '')
-}
-
-/** Дата «2026-11-09» → «09.11.2026» с защитой от мусора. */
-function auditDate(iso) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''))
-  if (!m) return String(iso || '')
-  return m[3] + '.' + m[2] + '.' + m[1]
-}
-
-/** Убираем из строки внутренние id, если они всё же просочились. */
-function stripIds(text) {
-  return String(text || '')
-    .replace(/\b(hw|news|jg|jm|fm|ovr|adm|gc|st)_[A-Za-z0-9А-Яа-я_]{4,}\b/g, '')
-    .replace(/\bsessions_purged\b/gi, '')
-    .replace(/\s{2,}/g, ' ')
-    .replace(/^[\s·,\-–—]+|[\s·,\-–—]+$/g, '')
-    .trim()
-}
-
-/** Класс панели при смене дня (направление + уважение reduce-motion) */
-function daySwapPanelClass(base = 'panel', { allow = true } = {}) {
-  if (!allow || !DAY_SWAP_MOTION || !motionOk() || !state.daySwap) return base
-  return `${base} day-swap day-swap-${state.daySwap}`
-}
-
 /** true, пока с Supabase не подтянулись реальные ДЗ (для скелетонов) */
 let initialDataLoading = true
-
-/** F5 / pull-reload — без заставки. Полное закрытие Chrome → type=navigate → с анимацией. */
-function isPageReload() {
-  try {
-    const nav = performance.getEntriesByType?.('navigation')?.[0]
-    if (nav) return nav.type === 'reload'
-    return performance.navigation?.type === 1
-  } catch {
-    return false
-  }
-}
 
 try {
   document.documentElement.classList.toggle('ui-motion', UI_MOTION)
 } catch {
   /* ignore */
-}
-
-/**
- * Телефон в виде «+7 900 000 00 00».
- * Плюс и код страны подставляются сами: человек вводит только цифры.
- */
-function formatPhone(raw) {
-  let digits = String(raw || '').replace(/\D/g, '')
-  if (!digits) return ''
-  if (digits[0] === '8') digits = '7' + digits.slice(1)
-  if (digits[0] !== '7') digits = '7' + digits
-  digits = digits.slice(0, 11)
-  const rest = digits.slice(1)
-  let out = '+7'
-  if (rest.length) out += ` ${rest.slice(0, 3)}`
-  if (rest.length > 3) out += ` ${rest.slice(3, 6)}`
-  if (rest.length > 6) out += ` ${rest.slice(6, 8)}`
-  if (rest.length > 8) out += ` ${rest.slice(8, 10)}`
-  return out
 }
 
 /**
@@ -997,23 +795,6 @@ let tabSwitchShieldUntil = 0
 /** Какие разделы уже подтянули данные с сервера в этой сессии. */
 const programsLoaded = new Set()
 
-/** Карточка «идёт сейчас / следующая пара / на сегодня всё». */
-/** Относительное время для ленты: «только что», «2 ч назад», «вчера». */
-function relativeTime(iso) {
-  const t = Date.parse(iso)
-  if (!Number.isFinite(t)) return ''
-  const diff = Date.now() - t
-  if (diff < 0) return 'скоро'
-  const min = Math.round(diff / 60000)
-  if (min < 1) return 'только что'
-  if (min < 60) return `${min} мин назад`
-  const hrs = Math.round(min / 60)
-  if (hrs < 24) return `${hrs} ч назад`
-  const days = Math.round(hrs / 24)
-  if (days === 1) return 'вчера'
-  if (days < 7) return `${days} дн назад`
-  return formatDateRu(String(iso).slice(0, 10))
-}
 function renderTabBody(tabId, group, opts = {}) {
   const consumeCascade = opts.cascade === undefined
   const wantCascade = consumeCascade ? state.cascade : !!opts.cascade

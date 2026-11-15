@@ -140,7 +140,9 @@ function freeNames(node) {
 // ── разбор main.js
 function analyzeMain() {
   const { src, ast } = parse(MAIN)
-  const lines = src.split(/\r?\n/)
+  // acorn считает переводом строки \r\n, \n и одиночный \r — режем так же,
+  // иначе номера строк расходятся и вырезается не тот кусок.
+  const lines = src.split(/\r\n|\r|\n/)
   const decls = []
   const imports = [] // { source, bindings:Set, start, end }
 
@@ -314,24 +316,27 @@ for (const name of cfg.names) {
     parts.push('')
     continue
   }
-  const withExport = text.replace(
-    new RegExp(`^(\\s*)(async\\s+)?function\\s+${name}\\b`, 'm'),
-    (m, ws, a) => `${ws}export ${a || ''}function ${name}`
-  )
-  if (withExport !== text) parts.push(withExport)
-  else if (d.kind === 'let' || d.kind === 'var') {
-    // Изменяемую переменную можно перенести, только если она никому снаружи не нужна.
-    // Иначе main.js пришлось бы присваивать импортированной переменной — так нельзя.
-    if (!internal.has(name)) {
-      throw new Error(
-        `${name} объявлена как ${d.kind}: добавь её в internal модуля (если она нужна только внутри) ` +
-          `или оставь в main.js`
-      )
-    }
-    parts.push(text)
-  } else if (d.kind === 'const') parts.push(text.replace(/^const\s/m, 'export const '))
-  else if (d.kind === 'class') parts.push(text.replace(/^class\s/m, 'export class '))
-  else throw new Error('Не понял, как экспортировать ' + name)
+
+  // Смещение объявления внутри вырезанного куска: считаем от начала строки,
+  // с которой начинается кусок (commentFrom). Так не сбивают ни комментарии,
+  // ни пустые строки над объявлением.
+  const lineStartOffset = (lineNo) => {
+    let n = 0
+    for (let i = 0; i < lineNo - 1; i++) n += main0.lines[i].length + 1
+    return n
+  }
+  // Ставим export в ту строку, где начинается само объявление. Ищем её
+  // регуляркой прямо в тексте куска: это не зависит от CRLF и от того,
+  // сколько комментариев оказалось над объявлением.
+  const outLines = text.split('\n')
+  const re =
+    d.kind === 'function'
+      ? new RegExp(`^\\s*(async\\s+)?function\\s+${name}\\b`)
+      : new RegExp(`^\\s*(const|let|var)\\s+${name}\\b`)
+  const idx = outLines.findIndex((l) => re.test(l))
+  if (idx < 0) throw new Error(`Не нашёл объявление ${name} в вырезанном куске`)
+  outLines[idx] = 'export ' + outLines[idx].replace(/^\s+/, '')
+  parts.push(outLines.join('\n'))
   parts.push('')
 }
 

@@ -9,7 +9,8 @@
   "admin": "screens/admin.js",
   "news": "features/news.js",
   "programs": "features/programs.js",
-  "more": "screens/more.js"
+  "more": "screens/more.js",
+  "time": "lib/time.js"
  },
  "names": {
   "UI_MOTION": "./lib/ui-feedback.js",
@@ -182,6 +183,30 @@
   "renderMoreSupport": "./screens/more.js",
   "renderProfileAvatarControls": "./screens/more.js",
   "loadImageFromFile": "./screens/more.js",
-  "openImageCropEditor": "./screens/more.js"
+  "openImageCropEditor": "./screens/more.js",
+  "todayISO": "./lib/time.js",
+  "hhmmToMinutes": "./lib/time.js",
+  "nowMinutesOfDay": "./lib/time.js",
+  "shortSubjectLabel": "./lib/time.js",
+  "humanMins": "./lib/time.js",
+  "dateForWeekday": "./lib/time.js",
+  "calendarDateForWeekday": "./lib/time.js",
+  "subtractMinutes": "./lib/time.js",
+  "weekRangeLabel": "./lib/time.js",
+  "formatDateRu": "./lib/time.js",
+  "weekdayFromISO": "./lib/time.js",
+  "weekdayNumFromIso": "./lib/time.js",
+  "canEdit": "./lib/time.js",
+  "normalizeSuggestKey": "./lib/time.js",
+  "formatPhone": "./lib/time.js",
+  "relativeTime": "./lib/time.js",
+  "shortPersonName": "./lib/time.js",
+  "typeLabel": "./lib/time.js",
+  "teacherDateLabel": "./lib/time.js",
+  "auditDate": "./lib/time.js",
+  "stripIds": "./lib/time.js",
+  "roleRu": "./lib/time.js",
+  "daySwapPanelClass": "./lib/time.js",
+  "isPageReload": "./lib/time.js"
  }
 }
