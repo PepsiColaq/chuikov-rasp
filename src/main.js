@@ -5201,7 +5201,7 @@ function renderAdminPanel() {
   })
   const codeLabel = el('input', {
     maxlength: '64',
-    placeholder: 'Новикова',
+    placeholder: 'Сидорова',
     required: true,
   })
   const codeRole = el('input', {
@@ -5238,7 +5238,7 @@ function renderAdminPanel() {
     const name = (codeLabel.value || '').trim()
     const roleTitle = (codeRole.value || '').trim()
     if (!name) {
-      flash('Напиши имя (Новикова…)', true)
+      flash('Напиши имя (Сидорова…)', true)
       return
     }
     const badge = roleTitle || 'Староста'
@@ -5301,7 +5301,7 @@ function renderAdminPanel() {
             type: 'text',
             maxlength: '64',
             value: row.label || '',
-            placeholder: 'Новикова',
+            placeholder: 'Сидорова',
             autocomplete: 'off',
           })
           const roleInput = el('input', {
@@ -5479,7 +5479,7 @@ function renderAdminPanel() {
     })
     const adminLabel = el('input', {
       maxlength: '64',
-      placeholder: 'Новикова',
+      placeholder: 'Сидорова',
       autocomplete: 'off',
     })
     const adminIssued = el('p', {
@@ -5648,7 +5648,7 @@ function renderAdminPanel() {
   // —— Кураторы: админ выдаёт код, куратор ведёт старост и права
   if (isAdminSectionOpen('curators')) {
     const curSec = el('div', { className: 'curator-admin' })
-    const label = el('input', { maxlength: '60', placeholder: 'Новикова Анна' })
+    const label = el('input', { maxlength: '60', placeholder: 'Сидорова Анна' })
     const code = el('input', {
       maxlength: '64',
       placeholder: 'Код куратора (от 8 символов)',
@@ -5895,7 +5895,7 @@ function renderAdminPanel() {
 
 /* ── Журнал безопасности ───────────────────────────────────────────────
    Раньше здесь была одна склеенная строка из технических полей:
-   «14.11.2026 00:03 · journal_mark · admin · g_0903_пд3 · ip … · Тарасов».
+   «14.11.2026 00:03 · journal_mark · admin · g_0903_пд3 · ip … · Иванов».
    Из неё нельзя было понять ни что случилось, ни кто это сделал.
    Теперь — карточка на событие с человеческим описанием. */
 
@@ -6030,8 +6030,8 @@ function parseAuditDetail(row) {
   if (!detail) return out
 
   // ── Отметка в журнале пары ──────────────────────────────────────────
-  // «Тарасов 2026-11-09 10:20 н/2→+/3 Разговаривала на паре»
-  // «Тарасов 2026-11-09 10:20 снята отметка»
+  // «Иванов 2026-11-09 10:20 н/2→+/3 Разговаривала на паре»
+  // «Иванов 2026-11-09 10:20 снята отметка»
   if (row.action === 'journal_mark') {
     const m = /^(.+?)\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s*(.*)$/.exec(detail)
     if (m) {
@@ -6105,7 +6105,7 @@ function parseAuditDetail(row) {
   }
 
   // ── Смена роли ──────────────────────────────────────────────────────
-  // «Михайлова → starosta»
+  // «Петрова → starosta»
   if (row.action === 'student_role') {
     const m = /^(.+?)\s*→\s*(\w+)$/.exec(detail)
     if (m) {
@@ -7450,7 +7450,7 @@ function renderMoreV2() {
             ? 'Студент'
             : 'Староста')
     const letter = label.charAt(0).toUpperCase() || '?'
-    // Имя сверху (Новикова), синий бейдж — отдельная подпись (Командир), иначе «Староста»
+    // Имя сверху (Сидорова), синий бейдж — отдельная подпись (Командир), иначе «Староста»
     const customRole = (session.roleTitle || '').trim()
     const roleText =
       session.role === 'admin'

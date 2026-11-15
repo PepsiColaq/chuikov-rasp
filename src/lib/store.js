@@ -2427,7 +2427,7 @@ export async function addStarostaCode(groupId, newCode, label = '', roleTitle = 
   const note = sanitizeText(label, 64)
   const title = sanitizeText(roleTitle, 32)
   const allGroups = groupId === ALL_GROUPS_ID
-  if (!note) throw new Error('Укажи имя (Новикова…)')
+  if (!note) throw new Error('Укажи имя (Сидорова…)')
   if (code.length < LIMITS.minCodeLength) throw new Error(`Код: мин. ${LIMITS.minCodeLength} символов`)
 
   if (supabaseConfigured) {

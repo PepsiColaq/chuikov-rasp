@@ -3312,7 +3312,7 @@ function renderAdminPanel() {
   })
   const codeLabel = el('input', {
     maxlength: '64',
-    placeholder: 'Новикова',
+    placeholder: 'Сидорова',
     required: true,
   })
   const codeRole = el('input', {
@@ -3349,7 +3349,7 @@ function renderAdminPanel() {
     const name = (codeLabel.value || '').trim()
     const roleTitle = (codeRole.value || '').trim()
     if (!name) {
-      flash('Напиши имя (Новикова…)', true)
+      flash('Напиши имя (Сидорова…)', true)
       return
     }
     const badge = roleTitle || 'Староста'
@@ -3412,7 +3412,7 @@ function renderAdminPanel() {
             type: 'text',
             maxlength: '64',
             value: row.label || '',
-            placeholder: 'Новикова',
+            placeholder: 'Сидорова',
             autocomplete: 'off',
           })
           const roleInput = el('input', {
@@ -3951,7 +3951,7 @@ function renderMoreV2() {
     const label =
       customLabel || (session.role === 'admin' ? 'Никитос' : 'Староста')
     const letter = label.charAt(0).toUpperCase() || '?'
-    // Имя сверху (Новикова), синий бейдж — отдельная подпись (Командир), иначе «Староста»
+    // Имя сверху (Сидорова), синий бейдж — отдельная подпись (Командир), иначе «Староста»
     const customRole = (session.roleTitle || '').trim()
     const roleText =
       session.role === 'admin'

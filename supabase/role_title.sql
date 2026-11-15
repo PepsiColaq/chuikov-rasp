@@ -1,4 +1,4 @@
--- Синяя подпись в профиле (Командир / Замком…) отдельно от имени (Новикова).
+-- Синяя подпись в профиле (Командир / Замком…) отдельно от имени (Сидорова).
 -- Выполни один раз в Supabase → SQL Editor. Можно повторять.
 
 alter table group_codes add column if not exists role_title text not null default '';

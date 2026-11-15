@@ -44,7 +44,7 @@ function gradeClass(value, attendance) {
   return 'grade-bad'
 }
 
-/** «Новикова Анна» → «Новикова А.» — в подписи расхода места мало. */
+/** «Сидорова Анна» → «Сидорова А.» — в подписи расхода места мало. */
 export function shortAuthor(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
   if (!parts.length) return ''
@@ -1228,7 +1228,7 @@ export function formatStamp(iso) {
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${time}`
 }
 
-/** «Новикова А. · сегодня 10:28:41» — кто и когда поставил отметку. */
+/** «Сидорова А. · сегодня 10:28:41» — кто и когда поставил отметку. */
 export function markStampLine(source) {
   const who = cleanText(source?.author)
   const when = formatStamp(source?.updatedAt || source?.createdAt || source?.at)
