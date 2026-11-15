@@ -6,7 +6,8 @@
   "install": "lib/install.js",
   "lightbox": "features/lightbox.js",
   "schedule": "screens/schedule.js",
-  "admin": "screens/admin.js"
+  "admin": "screens/admin.js",
+  "news": "features/news.js"
  },
  "names": {
   "UI_MOTION": "./lib/ui-feedback.js",
@@ -126,6 +127,27 @@
   "renderAuditSection": "./screens/admin.js",
   "auditCard": "./screens/admin.js",
   "downloadAuditCsv": "./screens/admin.js",
-  "renderLegalDoc": "./screens/admin.js"
+  "renderLegalDoc": "./screens/admin.js",
+  "formatNewsDate": "./features/news.js",
+  "createReaderShell": "./features/news.js",
+  "mountReaderCards": "./features/news.js",
+  "scrollReaderTo": "./features/news.js",
+  "attachCardSwipe": "./features/news.js",
+  "splitNewsMedia": "./features/news.js",
+  "lockReaderScroll": "./features/news.js",
+  "unlockReaderScroll": "./features/news.js",
+  "openNewsReader": "./features/news.js",
+  "renderHomeHero": "./features/news.js",
+  "startHeroAutoSlide": "./features/news.js",
+  "listFaculties": "./features/news.js",
+  "canWriteNews": "./features/news.js",
+  "renderNewsComposer": "./features/news.js",
+  "syncComposeToggle": "./features/news.js",
+  "homeNoLessonsText": "./features/news.js",
+  "renderHomeNow": "./features/news.js",
+  "renderHome": "./features/news.js",
+  "homeProgramKind": "./features/news.js",
+  "heroAutoTimer": "./features/news.js",
+  "heroAutoObserver": "./features/news.js"
  }
 }

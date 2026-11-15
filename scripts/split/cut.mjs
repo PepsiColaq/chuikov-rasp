@@ -107,6 +107,8 @@ function freeNames(node) {
 
   function walk(n, parent, key) {
     if (!n || typeof n.type !== 'string') return
+    // import.meta и new.target — не переменные
+    if (n.type === 'MetaProperty') return
 
     // имя свойства / метода / ключа объекта — это не переменная
     const isPropertyName =
@@ -389,6 +391,9 @@ function renameInjected(text, injectMap) {
 }
 
 const moduleTextFinal = renameInjected(moduleText, inject)
+
+// сохраняем до проверки: если текст не парсится, будет что посмотреть
+fs.writeFileSync(path.join(ROOT, `scripts/split/preview-${MODULE_KEY}.js`), moduleTextFinal)
 
 // ── проверяем готовый текст модуля: все свободные имена покрыты
 {

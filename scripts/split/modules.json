@@ -216,5 +216,37 @@
   "internal": [
    "scheduleImport"
   ]
+ },
+ "news": {
+  "file": "features/news.js",
+  "viaHub": true,
+  "header": "// Лента новостей: карточки на главной, полноэкранная читалка и компоузер.\n//\n// Читалка — отдельный слой с горизонтальными свайпами и автослайдом.\n// Вынесена вместе с компоузером: они делят черновик state.newsDraft.",
+  "names": [
+   "formatNewsDate",
+   "createReaderShell",
+   "mountReaderCards",
+   "scrollReaderTo",
+   "attachCardSwipe",
+   "splitNewsMedia",
+   "lockReaderScroll",
+   "unlockReaderScroll",
+   "openNewsReader",
+   "renderHomeHero",
+   "startHeroAutoSlide",
+   "listFaculties",
+   "canWriteNews",
+   "renderNewsComposer",
+   "syncComposeToggle",
+   "homeNoLessonsText",
+   "renderHomeNow",
+   "renderHome",
+   "homeProgramKind",
+   "heroAutoTimer",
+   "heroAutoObserver"
+  ],
+  "internal": [
+   "heroAutoTimer",
+   "heroAutoObserver"
+  ]
  }
 }

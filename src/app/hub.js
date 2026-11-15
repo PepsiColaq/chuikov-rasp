@@ -17,6 +17,8 @@
 const noop = () => {}
 
 export const hub = {
+  heroAutoObserver: noop,
+  heroAutoTimer: noop,
   auditDate: noop,
   homeNoLessonsText: noop,
   normalizePeopleQuery: noop,
