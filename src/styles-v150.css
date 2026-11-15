@@ -209,3 +209,222 @@
 .import-day span {
   color: var(--muted);
 }
+
+/* ── Плавное раскрытие без перерисовки страницы ─────────────────────────
+   Сворачиваемый блок: grid-template-rows 0fr → 1fr даёт анимацию высоты
+   без замера содержимого и работает в Safari. Раньше такие кнопки
+   вызывали render(), и прокрутка прыгала наверх. */
+.more-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 0.28s cubic-bezier(0.22, 0.9, 0.3, 1),
+    opacity 0.2s ease;
+}
+
+.more-fold.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.more-fold.no-anim {
+  transition: none;
+}
+
+.more-fold-clip {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.more-fold-body {
+  padding-top: 2px;
+}
+
+/* Строка «На экран телефона»: шеврон смотрит вниз, когда раскрыто */
+.more-row-install .more-row-ico:last-child {
+  transition: transform 0.22s ease;
+}
+
+.more-row-install.is-open .more-row-ico:last-child {
+  transform: rotate(90deg);
+}
+
+.install-help {
+  padding: 4px 2px 2px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+
+.install-help .btn {
+  margin-top: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .more-fold,
+  .more-row-install .more-row-ico:last-child {
+    transition: none;
+  }
+}
+
+/* ── Журнал безопасности: карточки событий ─────────────────────────────
+   Раньше это была одна длинная техническая строка. Теперь на каждое
+   событие — карточка: заголовок, кого касается, что изменилось, кто. */
+.audit-filters {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.audit-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.audit-chip {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.audit-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audit-card {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-card--warn {
+  border-color: color-mix(in srgb, #b42318 45%, var(--line));
+  background: color-mix(in srgb, #b42318 6%, var(--surface));
+}
+
+.audit-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.audit-card-title {
+  font-size: 14.5px;
+  line-height: 1.25;
+}
+
+.audit-card-when {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.audit-card-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.audit-card-change {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.audit-was {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.audit-now {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.audit-arrow {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.audit-card-text {
+  font-size: 13.5px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.audit-card-note {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.audit-card-tail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.audit-card-actor {
+  font-size: 11.5px;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audit-undo-btn {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.audit-undo-btn:active {
+  background: var(--accent-soft);
+}
+
+.audit-undo-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.audit-undone {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--muted);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}

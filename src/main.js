@@ -55,6 +55,7 @@ import {
   deleteSupportTicket,
   deleteAllSupportTickets,
   fetchAuditLog,
+  undoAudit,
   suggestTeachers,
   findTeacherSlots,
   findTeacherUpcoming,
@@ -293,88 +294,96 @@ async function tryNativeInstall() {
   return false
 }
 
-function renderInstallCard() {
-  if (isStandaloneApp()) {
-    return el('div', { className: 'card' }, [
-      el('h3', { text: 'На экране телефона' }),
-      el('p', { className: 'muted', text: 'Уже открыто как ярлык — всё ок.' }),
-    ])
-  }
-
-  const box = el('div', { className: 'card' })
-  box.append(el('h3', { text: 'На экран телефона' }))
-  box.append(
-    el('p', {
-      className: 'muted',
-      text: 'Не App Store — просто ярлык сайта. Нажми кнопку: на Android часто откроется установка сразу, на iPhone покажем куда нажать. Если ярлык уже был со старым именем «Чуйков» — удали его и добавь снова.',
-    }),
-  )
-
-  const btn = el('button', {
-    type: 'button',
-    className: 'btn',
-    text: isIosDevice() ? 'Как добавить на экран' : 'Добавить на экран',
-    onClick: async () => {
-      if (await tryNativeInstall()) return
-      state.showInstallHelp = !state.showInstallHelp
-      render()
-    },
-  })
-  box.append(btn)
-
-  if (installPromptReady && !isIosDevice()) {
-    box.append(
+/** Шаги установки под платформу — без заголовка и кнопки. */
+function installStepsNode() {
+  if (isIosDevice()) {
+    return el('div', { className: 'install-steps' }, [
+      el('p', { className: 'install-steps-title', text: 'iPhone (только Safari):' }),
+      el('ol', {}, [
+        el('li', { text: 'Открой этот сайт в Safari (не в Chrome).' }),
+        el('li', { text: 'Нажми кнопку «Поделиться» (квадрат со стрелкой вверх) внизу.' }),
+        el('li', { text: 'Пролистай и нажми «На экран «Домой»».' }),
+        el('li', { text: 'Подтверди «Добавить» — появится иконка «Расписание».' }),
+      ]),
       el('p', {
         className: 'muted',
-        style: 'margin-top:8px',
-        text: 'Браузер готов установить ярлык одним нажатием.',
+        text: 'Apple не даёт сайтам сделать это автоматически — только через «Поделиться».',
       }),
-    )
+    ])
   }
+  if (isAndroidDevice()) {
+    return el('div', { className: 'install-steps' }, [
+      el('p', { className: 'install-steps-title', text: 'Android:' }),
+      el('ol', {}, [
+        el('li', { text: 'Нажми кнопку «Добавить на экран» выше — если браузер предложит установку, подтверди.' }),
+        el('li', {
+          text: 'Если окна не было: меню ⋮ справа сверху → «Установить приложение» или «Добавить на главный экран».',
+        }),
+        el('li', { text: 'Лучше открывать в Chrome.' }),
+      ]),
+    ])
+  }
+  return el('div', { className: 'install-steps' }, [
+    el('p', {
+      className: 'muted',
+      text: 'На компьютере: в Chrome меню → «Установить Расписание…» или значок ⊕ в адресной строке.',
+    }),
+  ])
+}
 
-  if (state.showInstallHelp || isIosDevice()) {
-    if (isIosDevice()) {
-      box.append(
-        el('div', { className: 'install-steps' }, [
-          el('p', { className: 'install-steps-title', text: 'iPhone (только Safari):' }),
-          el('ol', {}, [
-            el('li', { text: 'Открой этот сайт в Safari (не в Chrome).' }),
-            el('li', { text: 'Нажми кнопку «Поделиться» (квадрат со стрелкой вверх) внизу.' }),
-            el('li', { text: 'Пролистай и нажми «На экран «Домой»».' }),
-            el('li', { text: 'Подтверди «Добавить» — появится иконка «Расписание».' }),
-          ]),
-          el('p', {
-            className: 'muted',
-            text: 'Apple не даёт сайтам сделать это автоматически — только через «Поделиться».',
-          }),
-        ]),
-      )
-    } else if (isAndroidDevice()) {
-      box.append(
-        el('div', { className: 'install-steps' }, [
-          el('p', { className: 'install-steps-title', text: 'Android:' }),
-          el('ol', {}, [
-            el('li', { text: 'Нажми кнопку «Добавить на экран» выше — если браузер предложит установку, подтверди.' }),
-            el('li', {
-              text: 'Если окна не было: меню ⋮ справа сверху → «Установить приложение» или «Добавить на главный экран».',
-            }),
-            el('li', { text: 'Лучше открывать в Chrome.' }),
-          ]),
-        ]),
-      )
-    } else {
-      box.append(
-        el('div', { className: 'install-steps' }, [
-          el('p', {
-            className: 'muted',
-            text: 'На компьютере: в Chrome меню → «Установить Расписание…» или значок ⊕ в адресной строке.',
-          }),
-        ]),
-      )
+/**
+ * Раскрыть/свернуть инструкцию на месте.
+ *
+ * Раньше кнопка вызывала render(): страница пересобиралась и прокрутка
+ * прыгала наверх. Теперь сворачиваемый блок живёт в DOM постоянно,
+ * а мы только переключаем класс — браузер анимирует высоту сам.
+ */
+function setInstallHelpOpen(open, { animate = true } = {}) {
+  state.showInstallHelp = !!open
+  const folds = document.querySelectorAll('#tab-stage .tab-pane[data-tab="more"] .more-fold')
+  const motion = animate && motionOk()
+  for (const fold of folds) {
+    if (motion) fold.classList.toggle('is-open', !!open)
+    else {
+      fold.classList.add('no-anim')
+      fold.classList.toggle('is-open', !!open)
+      void fold.offsetHeight
+      fold.classList.remove('no-anim')
     }
   }
+  const row = document.querySelector('#tab-stage .tab-pane[data-tab="more"] .more-row-install')
+  row?.classList.toggle('is-open', !!open)
+  row?.setAttribute('aria-expanded', open ? 'true' : 'false')
+}
 
-  return box
+function renderInstallCard() {
+  if (isStandaloneApp()) {
+    return el('p', { className: 'muted', text: 'Уже открыто как ярлык — всё ок.' })
+  }
+  return el('div', { className: 'install-help' }, [
+    el('p', {
+      className: 'muted',
+      style: 'margin:0 0 8px',
+      text: 'Не App Store — просто ярлык сайта. На Android часто откроется установка сразу, на iPhone покажем куда нажать. Если ярлык уже был со старым именем «Чуйков» — удали его и добавь снова.',
+    }),
+    el('button', {
+      type: 'button',
+      className: 'btn',
+      text: isIosDevice() ? 'Как добавить на экран' : 'Добавить на экран',
+      onClick: async () => {
+        if (await tryNativeInstall()) return
+        setInstallHelpOpen(true)
+      },
+    }),
+    installPromptReady && !isIosDevice()
+      ? el('p', {
+          className: 'muted',
+          style: 'margin:8px 0 0',
+          text: 'Браузер готов установить ярлык одним нажатием.',
+        })
+      : null,
+    installStepsNode(),
+  ])
 }
 
 function textNode(s) {
@@ -5876,74 +5885,7 @@ function renderAdminPanel() {
 
   // —— Журнал безопасности (спойлер)
   if (isAdminSectionOpen('audit')) {
-    const logBox = el('div', {})
-    const csvBtn = el('button', {
-      type: 'button',
-      className: 'btn secondary',
-      text: 'Скачать CSV',
-      disabled: true,
-      style: 'margin-top:8px',
-    })
-    logBox.append(
-      el('p', {
-        className: 'muted',
-        text: 'Входы, коды, оценки и явка. Красным — подозрительное.',
-      }),
-    )
-    const logList = el('div', { className: 'audit-list', text: 'Загрузка журнала…' })
-    logBox.append(logList, csvBtn)
-    box.append(wrapAdminAcc('audit', 'Журнал безопасности', [logBox]))
-
-    let auditRows = []
-    csvBtn.addEventListener('click', () => {
-      if (!auditRows.length) {
-        flash('Журнал пуст', true)
-        return
-      }
-      downloadAuditCsv(auditRows)
-      flash('CSV скачан')
-    })
-
-    fetchAuditLog(200)
-      .then((rows) => {
-        auditRows = rows
-        logList.replaceChildren()
-        if (!rows.length) {
-          logList.append(
-            el('p', {
-              className: 'muted',
-              text: 'Пока пусто — или выполни SQL security_audit.sql в Supabase.',
-            }),
-          )
-          return
-        }
-        csvBtn.disabled = false
-        for (const a of rows) {
-          const t = a.at ? new Date(a.at) : null
-          const when = t && !Number.isNaN(t.getTime())
-            ? `${formatDateRu(t.toISOString().slice(0, 10))} ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
-            : '—'
-          const line = [
-            when,
-            a.action,
-            a.byRole || '—',
-            a.groupId || '—',
-            a.ip ? `ip ${a.ip}` : '',
-            a.detail || '',
-          ]
-            .filter(Boolean)
-            .join(' · ')
-          logList.append(
-            el('div', {
-              className: a.suspicious ? 'audit-line audit-line--warn' : 'audit-line',
-              text: line,
-            }),
-          )
-        }
-      })
-      .catch((err) => {
-        logList.textContent = err.message || 'Не удалось загрузить журнал'
-      })
+    box.append(renderAuditSection())
   } else {
     box.append(wrapAdminAcc('audit', 'Журнал безопасности', null))
   }
@@ -5951,8 +5893,405 @@ function renderAdminPanel() {
   return box
 }
 
+/* ── Журнал безопасности ───────────────────────────────────────────────
+   Раньше здесь была одна склеенная строка из технических полей:
+   «14.11.2026 00:03 · journal_mark · admin · g_0903_пд3 · ip … · Тарасов».
+   Из неё нельзя было понять ни что случилось, ни кто это сделал.
+   Теперь — карточка на событие с человеческим описанием. */
+
+/** Человеческие названия действий. */
+const AUDIT_TITLES = {
+  login_admin: 'Вход админа',
+  login_student: 'Вход студента',
+  login_starosta: 'Вход старосты',
+  login_fail: 'Неудачный вход',
+  login_lock_ip: 'Блокировка по адресу',
+  login_lock_code: 'Блокировка по коду',
+  journal_mark: 'Отметка в журнале',
+  journal_grade: 'Поставлена оценка',
+  journal_grade_delete: 'Удалена оценка',
+  student_role: 'Смена роли',
+  homework_add: 'Добавлено ДЗ',
+  homework_delete: 'Удалено ДЗ',
+  news_add: 'Добавлена новость',
+  formation_mark: 'Отметка на построении',
+  override_set: 'Замена пары',
+  override_clear: 'Убрана замена',
+  program_save: 'Сохранена программа',
+  group_create: 'Создана группа',
+  group_deactivate: 'Отключена группа',
+  semester_reset: 'Сброс семестра',
+  audit_undo: 'Откат действия',
+  admin_display_name: 'Изменено имя админа',
+  starosta_code_add: 'Выдан код',
+  starosta_code_revoke: 'Отозван код',
+  starosta_label_rename: 'Переименован код',
+  starosta_role_title: 'Изменена подпись роли',
+  site_toggle: 'Переключение сайта',
+}
+
+/** Человеческие названия явки. */
+const ATT_LABEL = {
+  present: 'был',
+  absent: 'не был',
+  sick: 'болеет',
+  duty: 'на мероприятии',
+  event: 'мероприятие',
+  excused: 'уважительная',
+}
+
+function auditTitle(action) {
+  return AUDIT_TITLES[action] || action || 'Действие'
+}
+
+/** Группа по id: «g_0903_пд3» → «0903-ПД3». */
+function auditGroupName(raw) {
+  const id = String(raw || '')
+  if (!id || id === '—') return ''
+  const found = listGroups().find((g) => g.id === id)
+  if (found) return found.name
+  const guess = id.replace(/^g_/, '').replace(/_/g, '-').toUpperCase()
+  return /^[0-9А-Я-]+$/.test(guess) ? guess : ''
+}
+
+function auditWhen(iso) {
+  const d = iso ? new Date(iso) : null
+  if (!d || Number.isNaN(d.getTime())) return '—'
+  const today = new Date()
+  const sameDay =
+    d.getDate() === today.getDate() &&
+    d.getMonth() === today.getMonth() &&
+    d.getFullYear() === today.getFullYear()
+  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  if (sameDay) return `сегодня, ${time}`
+  return `${formatDateRu(d.toISOString().slice(0, 10))}, ${time}`
+}
+
+/**
+ * Разбор технических деталей в понятные части.
+ * Форматы приходят из SQL-функций и различаются по действию.
+ */
+function parseAuditDetail(row) {
+  const detail = String(row.detail || '').trim()
+  const out = { who: '', when: '', from: '', to: '', note: '', raw: detail }
+  if (!detail) return out
+
+  if (row.action === 'journal_mark') {
+    // «Тарасов 2026-11-09 10:20 н/2→+/3 Разговаривала на паре»
+    // или «Тарасов 2026-11-09 10:20 снята отметка»
+    const m = /^(.+?)\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s*(.*)$/.exec(detail)
+    if (m) {
+      out.who = m[1].trim()
+      out.when = `${formatDateRu(m[2])}, ${m[3]}`
+      const rest = m[4]
+      const arrow = rest.indexOf('→')
+      if (arrow >= 0) {
+        const before = rest.slice(0, arrow).trim()
+        const after = rest.slice(arrow + 1).trim()
+        const split = (s) => {
+          // Формат «явка/оценка текст»: н/2→+/3 «Разговаривала». Оценка —
+          // ведущее число после слэша, остальное — комментарий.
+          const [att, ...tail] = s.split('/')
+          const rest = tail.join('/').trim()
+          const gm = /^(\d)\s*(.*)$/.exec(rest)
+          const grade = gm ? gm[1] : ''
+          const note = gm ? gm[2].trim() : rest
+          return { att: att || '-', grade, note }
+        }
+        const b = split(before)
+        const a = split(after)
+        out.from = ATT_LABEL[b.att] || b.att
+        out.to = ATT_LABEL[a.att] || a.att
+        // Показываем оценку рядом с явкой, если она есть: «+ · 3».
+        if (a.grade) out.to = `${out.to} · ${a.grade}`
+        else if (b.grade) out.from = `${out.from} · ${b.grade}`
+        out.note = a.note || b.note || ''
+      } else if (/снята отметка/.test(rest)) {
+        out.from = 'отметка была'
+        out.to = 'отметки нет'
+      } else {
+        out.note = rest
+      }
+      return out
+    }
+  }
+
+  if (row.action === 'journal_grade') {
+    // «2026-11-09 10:20 +4»
+    const m = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s*\+?(\d?)(.*)$/.exec(detail)
+    if (m) {
+      out.when = `${formatDateRu(m[1])}, ${m[2]}`
+      out.to = m[3] ? `оценка ${m[3]}` : ''
+      out.note = m[4].trim()
+      return out
+    }
+  }
+
+  if (row.action === 'journal_grade_delete') {
+    // «jg_… 4» — id оценки и значение
+    const m = /^\S+\s+(\d)$/.exec(detail)
+    if (m) out.from = `оценка ${m[1]}`
+    return out
+  }
+
+  if (row.action === 'student_role') {
+    // «Михайлова → starosta»
+    const m = /^(.+?)\s*→\s*(\w+)$/.exec(detail)
+    if (m) {
+      out.who = m[1].trim()
+      out.to = roleRu(m[2])
+      return out
+    }
+  }
+
+  if (row.action === 'formation_mark') {
+    const m = /^(.+?)\s+(\d{4}-\d{2}-\d{2})\s*(.*)$/.exec(detail)
+    if (m) {
+      out.who = m[1].trim()
+      out.when = formatDateRu(m[2])
+      out.note = m[3]
+      return out
+    }
+  }
+
+  if (row.action === 'news_add' || row.action === 'program_save') {
+    out.to = detail
+    return out
+  }
+
+  if (row.action === 'homework_add' || row.action === 'homework_delete') {
+    const parts = detail.split(' · ')
+    out.to = parts[0] || detail
+    if (parts[1]) out.note = parts[1]
+    return out
+  }
+
+  if (row.action === 'override_set' || row.action === 'override_clear') {
+    const parts = detail.split(' · ')
+    out.who = parts[0] || ''
+    out.to = parts.slice(1).join(' · ')
+    return out
+  }
+
+  // Входы: «ok», «bad code-prefix=…», «blocked ip=…»
+  if (row.action.startsWith('login_')) {
+    if (detail === 'ok') out.to = 'успешно'
+    else if (/bad code-prefix=(\w+)/.test(detail)) {
+      out.to = 'неверный код'
+      out.note = `фрагмент ${RegExp.$1}`
+    } else if (/blocked/.test(detail)) {
+      out.to = 'заблокировано'
+      out.note = detail.replace(/^blocked\s*/, '')
+    } else out.to = detail
+    return out
+  }
+
+  if (row.action === 'audit_undo') {
+    out.to = detail.replace(/^отменено действие «(\w+)»/, (_, a) => `отменено «${auditTitle(a)}»`)
+    return out
+  }
+
+  out.to = detail
+  return out
+}
+
+function roleRu(role) {
+  const map = {
+    student: 'студент',
+    starosta: 'староста',
+    teacher: 'преподаватель',
+    admin: 'админ',
+    curator: 'куратор',
+    deputy: 'зам. старосты',
+  }
+  return map[role] || role
+}
+
+/** Фильтр по типу события. */
+const AUDIT_FILTERS = [
+  ['all', 'Все', () => true],
+  ['marks', 'Отметки', (a) => a.action === 'journal_mark' || a.action === 'formation_mark'],
+  ['grades', 'Оценки', (a) => a.action === 'journal_grade' || a.action === 'journal_grade_delete'],
+  ['roles', 'Роли', (a) => a.action === 'student_role' || /code|admin/i.test(a.action)],
+  ['content', 'Новости и ДЗ', (a) => /news|homework|program/.test(a.action)],
+  ['logins', 'Входы', (a) => a.action.startsWith('login_')],
+]
+
+function renderAuditSection() {
+  const logList = el('div', { className: 'audit-cards', text: 'Загрузка журнала…' })
+  const csvBtn = el('button', {
+    type: 'button',
+    className: 'btn secondary',
+    text: 'Скачать CSV',
+    disabled: true,
+    style: 'margin-top:10px',
+  })
+  const filterRow = el('div', { className: 'audit-filters' })
+  let auditRows = []
+  let activeFilter = 'all'
+
+  const applyFilter = () => {
+    if (!auditRows.length) return
+    const test = (AUDIT_FILTERS.find(([id]) => id === activeFilter) || AUDIT_FILTERS[0])[2]
+    const rows = auditRows.filter(test)
+    logList.replaceChildren()
+    if (!rows.length) {
+      logList.append(el('p', { className: 'muted', text: 'В этом разделе пока пусто.' }))
+      return
+    }
+    for (const row of rows) logList.append(auditCard(row, () => reload()))
+  }
+
+  const paintFilters = () => {
+    filterRow.replaceChildren()
+    for (const [id, label] of AUDIT_FILTERS) {
+      filterRow.append(
+        el('button', {
+          type: 'button',
+          className: `chip audit-chip${activeFilter === id ? ' chip-active' : ''}`,
+          text: label,
+          onClick: () => {
+            activeFilter = id
+            paintFilters()
+            applyFilter()
+          },
+        }),
+      )
+    }
+  }
+
+  const reload = () => {
+    logList.replaceChildren(el('p', { className: 'muted', text: 'Загрузка журнала…' }))
+    fetchAuditLog(200)
+      .then((rows) => {
+        auditRows = rows
+        csvBtn.disabled = !rows.length
+        if (!rows.length) {
+          logList.replaceChildren(
+            el('p', {
+              className: 'muted',
+              text: 'Пока пусто — или выполни SQL security_audit.sql в Supabase.',
+            }),
+          )
+          return
+        }
+        applyFilter()
+      })
+      .catch((err) => {
+        logList.replaceChildren(
+          el('p', { className: 'muted', text: err.message || 'Не удалось загрузить журнал' }),
+        )
+      })
+  }
+
+  csvBtn.addEventListener('click', () => {
+    if (!auditRows.length) {
+      flash('Журнал пуст', true)
+      return
+    }
+    downloadAuditCsv(auditRows)
+    flash('CSV скачан')
+  })
+
+  paintFilters()
+  reload()
+
+  return wrapAdminAcc('audit', 'Журнал безопасности', [
+    el('div', {}, [
+      el('p', {
+        className: 'muted',
+        style: 'margin:0 0 8px',
+        text: 'Кто и что сделал. Красным — подозрительное. У действий админа есть кнопка «Откатить».',
+      }),
+      filterRow,
+      logList,
+      csvBtn,
+    ]),
+  ])
+}
+
+/** Одна карточка события. */
+function auditCard(row, onChanged) {
+  const parsed = parseAuditDetail(row)
+  const title = auditTitle(row.action)
+  const actor = row.actor || (row.byRole === 'admin' ? 'Админ' : roleRu(row.byRole) || '—')
+  const groupName = auditGroupName(row.groupId)
+
+  const lines = []
+  const meta = []
+  if (parsed.who) meta.push(parsed.who)
+  if (parsed.when) meta.push(parsed.when)
+  if (groupName) meta.push(groupName)
+  if (meta.length) lines.push(el('div', { className: 'audit-card-meta', text: meta.join(' · ') }))
+
+  if (parsed.from || parsed.to) {
+    lines.push(
+      el('div', { className: 'audit-card-change' }, [
+        parsed.from ? el('span', { className: 'audit-was', text: parsed.from }) : null,
+        parsed.from && parsed.to ? el('span', { className: 'audit-arrow', text: '→' }) : null,
+        parsed.to ? el('span', { className: 'audit-now', text: parsed.to }) : null,
+      ]),
+    )
+  } else if (parsed.to) {
+    lines.push(el('div', { className: 'audit-card-text', text: parsed.to }))
+  }
+  if (parsed.note) lines.push(el('div', { className: 'audit-card-note', text: parsed.note }))
+
+  const tail = el('div', { className: 'audit-card-tail' }, [
+    el('span', {
+      className: 'audit-card-actor',
+      text: row.ip ? `${actor} · ip ${row.ip}` : actor,
+    }),
+  ])
+
+  if (row.undoneAt) {
+    tail.append(
+      el('span', {
+        className: 'audit-undone',
+        text: `откатано${row.undoneBy ? ` · ${row.undoneBy}` : ''}`,
+      }),
+    )
+  } else if (row.canUndo) {
+    const undoBtn = el('button', {
+      type: 'button',
+      className: 'audit-undo-btn',
+      text: 'Откатить',
+      onClick: async () => {
+        const what = parsed.who ? `${parsed.who}` : title.toLowerCase()
+        const change = parsed.from || parsed.to ? ` (${parsed.from || '—'} → ${parsed.to || '—'})` : ''
+        if (!confirm(`Вернуть как было?\n\n${title}: ${what}${change}\n\nОтменить это будет нельзя.`)) return
+        undoBtn.disabled = true
+        undoBtn.textContent = 'Откатываем…'
+        try {
+          const res = await undoAudit(row.id)
+          flash(`Откатано · ${res?.rows || 0} строк`)
+          onChanged()
+        } catch (err) {
+          undoBtn.disabled = false
+          undoBtn.textContent = 'Откатить'
+          flash(err.message, true)
+        }
+      },
+    })
+    tail.append(undoBtn)
+  }
+
+  return el(
+    'div',
+    { className: `audit-card${row.suspicious ? ' audit-card--warn' : ''}` },
+    [
+      el('div', { className: 'audit-card-head' }, [
+        el('strong', { className: 'audit-card-title', text: title }),
+        el('span', { className: 'audit-card-when', text: auditWhen(row.at) }),
+      ]),
+      ...lines,
+      tail,
+    ],
+  )
+}
+
 function downloadAuditCsv(rows) {
-  const header = ['at', 'action', 'byRole', 'groupId', 'ip', 'detail', 'suspicious']
+  const header = ['at', 'action', 'byRole', 'actor', 'groupId', 'ip', 'detail', 'undoneAt', 'undoneBy', 'suspicious']
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
   const lines = [header.join(',')]
   for (const a of rows) {
@@ -5961,9 +6300,12 @@ function downloadAuditCsv(rows) {
         a.at || '',
         a.action || '',
         a.byRole || '',
+        a.actor || '',
         a.groupId || '',
         a.ip || '',
         a.detail || '',
+        a.undoneAt || '',
+        a.undoneBy || '',
         a.suspicious ? '1' : '0',
       ]
         .map(esc)
@@ -6127,12 +6469,13 @@ function moreThemeIcon(isDark) {
   return wrap
 }
 
-function moreSettingsRow({ icon, title, sub, onClick, leading }) {
+function moreSettingsRow({ icon, title, sub, onClick, leading, className = '', expanded = null }) {
   return el(
     'button',
     {
       type: 'button',
-      className: 'more-row',
+      className: `more-row${className ? ` ${className}` : ''}${expanded ? ' is-open' : ''}`,
+      'aria-expanded': expanded == null ? null : expanded ? 'true' : 'false',
       onClick,
     },
     [
@@ -7073,21 +7416,30 @@ function renderMoreV2() {
         icon: 'phone',
         title: 'На экран телефона',
         sub: isIosDevice() ? 'Инструкция для Safari' : 'Ярлык сайта',
+        className: 'more-row-install',
+        expanded: !!state.showInstallHelp,
         onClick: async () => {
           if (await tryNativeInstall()) return
-          state.showInstallHelp = !state.showInstallHelp
-          render()
+          setInstallHelpOpen(!state.showInstallHelp)
         },
       }),
     )
   }
 
   const settingsCard = el('div', { className: 'card more-settings' }, settingsKids)
+  if (!isStandaloneApp()) {
+    const open = !!state.showInstallHelp || isIosDevice()
+    settingsCard.append(
+      el('div', { className: `more-fold${open ? ' is-open' : ''}` }, [
+        el('div', { className: 'more-fold-clip' }, [
+          el('div', { className: 'more-fold-body' }, [renderInstallCard()]),
+        ]),
+      ]),
+    )
+  }
   panel.append(settingsCard)
 
-  if (!isStandaloneApp() && (state.showInstallHelp || isIosDevice())) {
-    panel.append(renderInstallCard())
-  } else if (isStandaloneApp()) {
+  if (isStandaloneApp()) {
     panel.append(
       el('div', { className: 'card' }, [
         el('p', { className: 'muted', style: 'margin:0', text: 'Уже открыто как ярлык — всё ок.' }),
@@ -11154,6 +11506,11 @@ function render(opts = {}) {
     return
   }
 
+  // Пересборка DOM обнуляет прокрутку панели, поэтому кнопки, которые
+  // раньше дёргали render(), швыряли страницу наверх. Запоминаем позицию
+  // и возвращаем после — одинаково для всех таких кнопок.
+  const keepScroll = opts.keepScroll !== false && group ? readPaneScroll(state.tab) : null
+
   root.replaceChildren()
   // Жёсткий бан устройства: даже гость не смотрит расписание (админ не режется)
   if (isLocalDeviceBanned() && !adminHere) {
@@ -11259,6 +11616,34 @@ function render(opts = {}) {
   const formation = renderFormationMarksOverlay()
   if (formation) root.append(formation)
   maybeSeekHwDay()
+  if (keepScroll && keepScroll.top > 0) restorePaneScroll(state.tab, keepScroll)
+}
+
+/** Позиция прокрутки панели вкладки: `{ top, left }` или null. */
+function readPaneScroll(tabId = state.tab) {
+  const pane = document.querySelector(`#tab-stage .tab-pane[data-tab="${paneTabId(tabId)}"]`)
+  if (!pane) return null
+  return { top: pane.scrollTop || 0, left: pane.scrollLeft || 0 }
+}
+
+/**
+ * Вернуть прокрутку после пересборки DOM.
+ * Повторяем в двух кадрах: высота панели может измениться уже после вставки
+ * (подгрузка шрифтов, картинок), и тогда браузер обнулит scrollTop.
+ */
+function restorePaneScroll(tabId = state.tab, pos) {
+  if (!pos) return
+  const apply = () => {
+    const pane = document.querySelector(`#tab-stage .tab-pane[data-tab="${paneTabId(tabId)}"]`)
+    if (!pane) return
+    pane.scrollTop = pos.top
+    if (pos.left) pane.scrollLeft = pos.left
+  }
+  apply()
+  requestAnimationFrame(() => {
+    apply()
+    requestAnimationFrame(apply)
+  })
 }
 
 function bootLogoUrl() {
@@ -11768,7 +12153,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=151`, { scope: base })
+    .register(`${base}sw.js?v=152`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда

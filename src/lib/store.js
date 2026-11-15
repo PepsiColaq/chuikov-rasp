@@ -3093,7 +3093,39 @@ export async function fetchAuditLog(limit = 80) {
     ip: a.ip || '',
     visitorId: a.visitorId || a.visitor_id || '',
     suspicious: !!(a.suspicious),
+    // Поля ниже появляются после миграции v160: без неё журнал продолжит
+    // работать, просто без автора и без кнопки отката.
+    actor: a.actor || '',
+    canUndo: !!a.canUndo,
+    undoneAt: a.undoneAt || '',
+    undoneBy: a.undoneBy || '',
+    undo: Array.isArray(a.undo) ? a.undo : [],
   }))
+}
+
+/**
+ * Откатить действие админа по записи журнала.
+ *
+ * Сервер сам проверяет, что сессия админская, что действие ещё не
+ * откатывали и что для него есть снимок состояния. Здесь остаётся только
+ * показать понятную ошибку, если миграция не выполнена.
+ */
+export async function undoAudit(auditId) {
+  if (!supabaseConfigured || !supabase) throw new Error('Нет подключения к серверу')
+  const s = getSession()
+  if (!s || s.role !== 'admin' || !s.token) throw new Error('Нужен вход админа')
+  const { data, error } = await supabase.rpc('rasp_undo_audit', {
+    p_token: s.token,
+    p_audit_id: Number(auditId),
+  })
+  if (error) {
+    const msg = rpcErrorMessage(error)
+    if (/could not find the function|does not exist/i.test(msg)) {
+      throw new Error('Откат не включён на сервере. Выполни supabase/v160_audit_undo.sql в Supabase → SQL Editor.')
+    }
+    throw new Error(msg)
+  }
+  return parseRpcJson(data)
 }
 
 export function getSemesterLabel() {
