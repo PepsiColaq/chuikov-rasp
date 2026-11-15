@@ -11,3 +11,10 @@ scripts/.tg-webhook-secret.txt
 
 # локальные резервные копии перед ручным восстановлением данных
 backups/
+
+# тестовый прогон в jsdom (пересобирается локально)
+dist-test
+# черновики анализов при разбивке main.js
+scratch-*
+scripts/split/preview-*
+src/*.bak
