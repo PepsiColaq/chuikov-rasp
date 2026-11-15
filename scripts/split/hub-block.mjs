@@ -2,6 +2,7 @@
 // Вызывается после каждого вырезания — потому что часть функций уехала в модуль
 // и её больше нельзя регистрировать (иначе ReferenceError).
 import fs from 'node:fs'
+import path from 'node:path'
 import * as acorn from 'acorn'
 
 const MAIN = 'src/main.js'
@@ -33,6 +34,27 @@ export const HUB_FNS = [
   'formationLoadKey', 'initialDataLoading', 'openProgramScreen',
 ]
 
+/** Какие имена модули берут через мост — читаем прямо из их кода. */
+export function collectHubNames() {
+  const names = new Set()
+  const files = []
+  ;(function walk(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.endsWith('.js')) files.push(p.replace(/\\/g, '/'))
+    }
+  })('src')
+
+  for (const f of files) {
+    if (f.endsWith('src/main.js') || f.endsWith('app/hub.js')) continue
+    const text = fs.readFileSync(f, 'utf8')
+    // прокси объявляются строкой: const render = (...args) => hub.render(...args)
+    for (const m of text.matchAll(/^\s*const (\w+) = \(\.\.\.args\) => hub\.\1\(/gm)) names.add(m[1])
+  }
+  return names
+}
+
 /** Возвращает текст блока моста для данного исходника main.js. */
 export function buildHubBlock(src) {
   const ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module' })
@@ -45,13 +67,14 @@ export function buildHubBlock(src) {
     if (n.type === 'ImportDeclaration')
       for (const sp of n.specifiers) if (sp.local) available.add(sp.local.name)
   }
-  const present = [...new Set(HUB_FNS)].filter((n) => available.has(n)).sort()
+  const wanted = collectHubNames()
+  const present = [...wanted].filter((n) => available.has(n)).sort()
   if (!present.length) return ''
   return (
     `\nimport { wireHub } from './app/hub.js'` +
     `\n\n// Отдаём вынесенным модулям функции ядра.\n` +
-    `// Часть из них объявлена здесь, часть уже живёт в модулях (поэтому они в импортах).\n` +
-    `// До этого вызова в hub лежат пустышки — модули не падают, а просто ничего не делают.\n` +
+    `// Список собирается автоматически: берутся ровно те имена, которые модули\n` +
+    `// зовут через hub. Часть объявлена здесь, часть уже живёт в модулях (в импортах).\n` +
     `wireHub({ ${present.join(', ')} })`
   )
 }

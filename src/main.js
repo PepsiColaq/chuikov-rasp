@@ -150,12 +150,14 @@ import { canManagePrograms, emptyProgramDraft, openProgramReader, programGroupId
 import { clearCascadeAnim, loadImageFromFile, moreSettingsRow, moreSvg, moreThemeIcon, openImageCropEditor, openProgramScreen, paintStaffCard, renderBannedGate, renderCabinetCard, renderClosedGate, renderMore, renderMoreClassic, renderMoreContacts, renderMoreGroup, renderMoreMyCode, renderMoreOverrides, renderMoreStudents, renderMoreSupport, renderMoreV2, renderNav, renderProfileAvatarControls, tabSwitchShieldActive } from './screens/more.js'
 import { auditDate, calendarDateForWeekday, canEdit, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, hhmmToMinutes, humanMins, isPageReload, normalizeSuggestKey, nowMinutesOfDay, relativeTime, roleRu, shortPersonName, shortSubjectLabel, stripIds, subtractMinutes, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso } from './lib/time.js'
 import { buildRoomResultsNodes, buildTeacherResultsNodes, renderRoomSearch, renderRoomSlotCard, renderTeacherSearch, renderTeacherSlotCard, renderTeachersTab, resolveFreeRoomsSlotKey, roomLink } from './screens/directory.js'
+import { buildPersistentPager, getPagerTrack, journalCtx, pagerIndex, pagerSetX, pagerSnapToIndex, pagerWidth, paneTabId, readPaneScroll, renderStudyTab, renderTabBody, resetWindowScroll, restorePaneScroll, sizePagerPanes, softUpdateNav, softUpdateTopLead, withTabScrollPreserved } from './app/pager.js'
 import { wireHub } from './app/hub.js'
 
 // Отдаём вынесенным модулям функции ядра.
-// Часть из них объявлена здесь, часть уже живёт в модулях (поэтому они в импортах).
-// До этого вызова в hub лежат пустышки — модули не падают, а просто ничего не делают.
-wireHub({ calendarDateForWeekday, canEdit, cancelGroupPicker, closeHwLightbox, confirmAndLogout, dateForWeekday, daySwapPanelClass, formatDateRu, gotoTab, hhmmToMinutes, homeProgramKind, humanMins, initialDataLoading, isHwView, maybeSeekHwDay, nowMinutesOfDay, openGroupPicker, openHwLightbox, openImageCropEditor, openMoreScreen, openNewsReader, openProgramReader, openProgramScreen, paintStaffCard, pickGroupWithFeel, programGroupId, redrawAfterData, refreshTabPanes, render, renderAddHwInline, renderAdminFreeRooms, renderAdminPanel, renderAuditSection, renderBannedGate, renderClosedGate, renderDays, renderFormationCard, renderFormationMarksOverlay, renderFormationSettings, renderGradesTab, renderGroupPicker, renderHome, renderHomeHero, renderHomeNow, renderHomeTextSettings, renderHwAttachments, renderHwCard, renderHwTab, renderInlineHwGroups, renderInstallCard, renderJournalOverlay, renderLegalDoc, renderLessonCard, renderMonthCalendar, renderMore, renderMoreClassic, renderMoreContacts, renderMoreGroup, renderMoreMyCode, renderMoreOverrides, renderMoreStudents, renderMoreSupport, renderMoreV2, renderNav, renderNewsComposer, renderNowStrip, renderOverrideForm, renderOverridesTab, renderProfileAvatarControls, renderProgramEditor, renderPrograms, renderRoomSearch, renderSchedule, renderScheduleImport, renderSessionSettings, renderStudentsScreen, renderStudyTab, renderTabBody, renderTeacherSearch, renderTeachersTab, renderTop, resetWindowScroll, roomLink, selectGroup, setInstallHelpOpen, shortSubjectLabel, softRefreshCurrentTab, softUpdateNav, softUpdateTopLead, subtractMinutes, switchTab, todayISO, weekRangeLabel, weekdayFromISO, weekdayNumFromIso, withTabScrollPreserved, wrapAdminAcc })
+// Список собирается автоматически: берутся ровно те имена, которые модули
+// зовут через hub. Часть объявлена здесь, часть уже живёт в модулях (в импортах).
+wireHub({ auditDate, calendarDateForWeekday, canEdit, confirmAndLogout, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, gotoTab, hhmmToMinutes, homeNoLessonsText, humanMins, initialDataLoading, normalizePeopleQuery, nowMinutesOfDay, openGroupPicker, openImageCropEditor, openMoreScreen, openProgramScreen, pickGroupWithFeel, programsLoaded, refreshTabPanes, render, renderPrograms, resolveFreeRoomsSlotKey, roleRu, roomLink, shortSubjectLabel, softRefreshCurrentTab, softUpdateNav, stripIds, subtractMinutes, switchTab, tabLeadText, tabSwitchShieldUntil, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso, withTabScrollPreserved })
+
 
 
 // Внедряем функции из main.js в вынесенный модуль
@@ -336,197 +338,6 @@ let tabSwitchShieldUntil = 0
 /** Какие разделы уже подтянули данные с сервера в этой сессии. */
 const programsLoaded = new Set()
 
-function renderTabBody(tabId, group, opts = {}) {
-  const consumeCascade = opts.cascade === undefined
-  const wantCascade = consumeCascade ? state.cascade : !!opts.cascade
-  if (consumeCascade) state.cascade = false
-  const cascade = wantCascade && motionOk()
-  const wrap = el('div', { className: cascade ? 'tab-pane-inner do-cascade' : 'tab-pane-inner' })
-  if (tabId === 'home') wrap.append(renderHome())
-  else if (tabId === 'schedule') wrap.append(renderDays(), renderSchedule())
-  else if (tabId === 'grades') wrap.append(renderStudyTab())
-  else if (tabId === 'teachers') wrap.append(renderTeachersTab())
-  // Старые id: панелей для них больше нет, но внутренние вызовы остались рабочими
-  else if (tabId === 'hw') wrap.append(renderDays(), renderHwTab())
-  else if (tabId === 'overrides') wrap.append(renderOverridesTab(group || getGroup(state.groupId)))
-  else wrap.append(renderMore())
-  if (cascade) {
-    const done = () => wrap.classList.remove('do-cascade')
-    wrap.addEventListener('animationend', done, { once: true })
-    window.setTimeout(done, 520)
-  }
-  return wrap
-}
-
-/** Вкладка «Учёба»: журнал с оценками и домашка — переключатель в шапке вкладки. */
-function renderStudyTab() {
-  const wrap = el('div', { className: 'panel study-panel' })
-  const mode = state.studyMode === 'hw' ? 'hw' : 'grades'
-  const chip = (id, label) =>
-    el('button', {
-      type: 'button',
-      className: `study-tab${mode === id ? ' is-on' : ''}`,
-      text: label,
-      onClick: () => {
-        if (mode === id) return
-        hapticTap()
-        state.studyMode = id
-        if (id === 'hw' && HW_TAB_BY_DAY) state.hwDaySeek = null
-        if (!refreshTabPanes(['grades'])) render({ force: true })
-        else softUpdateNav()
-      },
-    })
-  // Переключатель — часть шапки вкладки, а не отдельная «карточка с отступом».
-  wrap.append(
-    el('div', { className: 'study-head' }, [
-      el('div', { className: 'study-tabs' }, [chip('grades', 'Журнал'), chip('hw', 'Домашка')]),
-    ]),
-  )
-  if (mode === 'hw') wrap.append(renderDays(), renderHwTab())
-  else wrap.append(renderGradesTab(journalCtx()))
-  return wrap
-}
-
-function softUpdateNav() {
-  const nav = document.querySelector('nav.nav')
-  if (!nav) return false
-  const buttons = [...nav.querySelectorAll(':scope > button')]
-  buttons.forEach((btn, i) => {
-    const id = TAB_ORDER[i]
-    if (!id) return
-    btn.classList.toggle('active', state.tab === id)
-  })
-  softUpdateTopLead()
-  return buttons.length === TAB_ORDER.length
-}
-
-/** Подпись под названием группы («Пары» / «ДЗ» / …) при смене вкладки без полного render */
-function softUpdateTopLead() {
-  const sub = document.querySelector('.topbar .topbar-sub')
-  if (!sub) return false
-  const group = state.groupId ? getGroup(state.groupId) : null
-  const text = tabLeadText(state.tab, group) || '\u00a0'
-  if (sub.textContent !== text) sub.textContent = text
-  return true
-}
-
-/** Сохранить скролл вкладки через render/refresh (иначе прыжок вверх при раскрытии ДЗ) */
-function withTabScrollPreserved(tabId, fn) {
-  const pane = document.querySelector(`#tab-stage .tab-pane[data-tab="${tabId}"]`)
-  const top = pane ? pane.scrollTop : 0
-  const left = pane ? pane.scrollLeft : 0
-  const result = fn()
-  const restore = () => {
-    const p = document.querySelector(`#tab-stage .tab-pane[data-tab="${tabId}"]`)
-    if (!p) return
-    p.scrollTop = top
-    p.scrollLeft = left
-  }
-  restore()
-  requestAnimationFrame(() => {
-    restore()
-    requestAnimationFrame(restore)
-  })
-  return result
-}
-
-/** Сброс скролла окна — иначе после ДЗ «Пары/Преп» выглядят пустыми */
-function resetWindowScroll() {
-  try {
-    window.scrollTo(0, 0)
-    document.documentElement.scrollTop = 0
-    document.body.scrollTop = 0
-  } catch {
-    /* ignore */
-  }
-}
-
-function pagerWidth() {
-  const stage = document.getElementById('tab-stage')
-  const sw = stage?.clientWidth || 0
-  if (sw > 0) return sw
-  // stage ещё не в DOM / без layout — оценка по ширине #app или окна (не жёсткие 480)
-  const app = document.getElementById('app')
-  const aw = app?.clientWidth || 0
-  if (aw > 0) return aw
-  try {
-    if (window.matchMedia('(min-width: 1280px)').matches) return Math.min(window.innerWidth, 1180)
-    if (window.matchMedia('(min-width: 1024px)').matches) return Math.min(window.innerWidth, 1080)
-    if (window.matchMedia('(min-width: 768px)').matches) return Math.min(window.innerWidth, 680)
-  } catch {
-    /* ignore */
-  }
-  return Math.min(window.innerWidth, 480) || 360
-}
-
-function pagerIndex(tabId = state.tab) {
-  const i = TAB_ORDER.indexOf(tabId)
-  return i < 0 ? 0 : i
-}
-
-function getPagerTrack() {
-  return document.querySelector('#tab-stage > .tab-track.tab-pager')
-}
-
-function sizePagerPanes(track, w) {
-  if (!track) return
-  track.querySelectorAll(':scope > .tab-pane').forEach((pane) => {
-    pane.style.flex = `0 0 ${w}px`
-    pane.style.width = `${w}px`
-    pane.style.minWidth = `${w}px`
-  })
-}
-
-function pagerSetX(x, { animate = false } = {}) {
-  const track = getPagerTrack()
-  if (!track) return
-  const soft = motionOk()
-  track.style.transition = animate
-    ? soft
-      ? 'transform 0.34s cubic-bezier(.2,.85,.25,1)'
-      : 'transform 0.3s cubic-bezier(.22,.9,.3,1)'
-    : 'none'
-  track.style.transform = `translate3d(${x}px,0,0)`
-}
-
-function pagerSnapToIndex(index, { animate = false } = {}) {
-  const w = pagerWidth()
-  const track = getPagerTrack()
-  sizePagerPanes(track, w)
-  const i = Math.max(0, Math.min(TAB_ORDER.length - 1, index))
-  pagerSetX(-i * w, { animate })
-  return i
-}
-
-function buildPersistentPager(group, { cascadeTab = null } = {}) {
-  const w = pagerWidth()
-  const track = el('div', { className: 'tab-track tab-pager' })
-  const active = pagerIndex()
-  for (let idx = 0; idx < TAB_ORDER.length; idx++) {
-    const tabId = TAB_ORDER[idx]
-    const pane = el('div', { className: 'tab-pane', dataset: { tab: tabId } })
-    pane.style.flex = `0 0 ${w}px`
-    pane.style.width = `${w}px`
-    pane.style.minWidth = `${w}px`
-    pane.append(
-      renderTabBody(tabId, group, {
-        cascade: cascadeTab === tabId,
-      }),
-    )
-    track.append(pane)
-  }
-  track.style.transition = 'none'
-  track.style.transform = `translate3d(${-active * w}px,0,0)`
-  return track
-}
-
-/** Старые id вкладок → актуальные панели пейджера (переходники остались в коде). */
-function paneTabId(tabId) {
-  if (tabId === 'hw') return 'grades'
-  if (tabId === 'overrides') return 'more'
-  return tabId
-}
-
 /** Обновить содержимое вкладок на месте — без уничтожения pager */
 function refreshTabPanes(tabIds, { force = false } = {}) {
   const group = state.groupId ? getGroup(state.groupId) : null
@@ -576,33 +387,6 @@ function redrawAfterData(tabIds = ['hw', 'schedule']) {
   softUpdateNav()
   paintFlashSlot()
   if (isHwView()) maybeSeekHwDay()
-}
-
-function journalCtx() {
-  return {
-    el,
-    state,
-    flash,
-    render,
-    getGroup,
-    getLessons,
-    /** Пары группы на дату: в сессию это экзамены, иначе недельный шаблон. */
-    lessonsOn: (groupId, dateStr) => lessonsForDate(groupId, dateStr),
-    formatDateRu,
-    dateForWeekday,
-    weekdayFromISO,
-    /** Сменить день прямо из журнала, без прыжка на «Пары». */
-    setDay: (d) => {
-      const prev = Number(state.day)
-      const next = Number(d)
-      if (!next || next === prev) return
-      if (DAY_SWAP_MOTION && motionOk()) state.daySwap = next > prev ? 'right' : 'left'
-      else state.daySwap = null
-      state.day = next
-      refreshTabPanes(['grades', 'schedule'])
-      softUpdateNav()
-    },
-  }
 }
 
 function switchTab(id, { animate = false, fromDrag = false } = {}) {
@@ -1111,33 +895,6 @@ function render(opts = {}) {
   if (formation) root.append(formation)
   maybeSeekHwDay()
   if (keepScroll && keepScroll.top > 0) restorePaneScroll(state.tab, keepScroll)
-}
-
-/** Позиция прокрутки панели вкладки: `{ top, left }` или null. */
-function readPaneScroll(tabId = state.tab) {
-  const pane = document.querySelector(`#tab-stage .tab-pane[data-tab="${paneTabId(tabId)}"]`)
-  if (!pane) return null
-  return { top: pane.scrollTop || 0, left: pane.scrollLeft || 0 }
-}
-
-/**
- * Вернуть прокрутку после пересборки DOM.
- * Повторяем в двух кадрах: высота панели может измениться уже после вставки
- * (подгрузка шрифтов, картинок), и тогда браузер обнулит scrollTop.
- */
-function restorePaneScroll(tabId = state.tab, pos) {
-  if (!pos) return
-  const apply = () => {
-    const pane = document.querySelector(`#tab-stage .tab-pane[data-tab="${paneTabId(tabId)}"]`)
-    if (!pane) return
-    pane.scrollTop = pos.top
-    if (pos.left) pane.scrollLeft = pos.left
-  }
-  apply()
-  requestAnimationFrame(() => {
-    apply()
-    requestAnimationFrame(apply)
-  })
 }
 
 function bootLogoUrl() {

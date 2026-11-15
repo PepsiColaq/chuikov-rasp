@@ -17,6 +17,9 @@
 const noop = () => {}
 
 export const hub = {
+  tabLeadText: noop,
+  isEditingFormNow: noop,
+  pendingRedraw: noop,
   formatPhone: noop,
   tabSwitchShieldUntil: noop,
   programsLoaded: noop,

@@ -11,7 +11,8 @@
   "programs": "features/programs.js",
   "more": "screens/more.js",
   "time": "lib/time.js",
-  "directory": "screens/directory.js"
+  "directory": "screens/directory.js",
+  "pager": "app/pager.js"
  },
  "names": {
   "UI_MOTION": "./lib/ui-feedback.js",
@@ -217,6 +218,23 @@
   "renderRoomSlotCard": "./screens/directory.js",
   "renderTeacherSearch": "./screens/directory.js",
   "buildTeacherResultsNodes": "./screens/directory.js",
-  "resolveFreeRoomsSlotKey": "./screens/directory.js"
+  "resolveFreeRoomsSlotKey": "./screens/directory.js",
+  "pagerWidth": "./app/pager.js",
+  "pagerIndex": "./app/pager.js",
+  "getPagerTrack": "./app/pager.js",
+  "sizePagerPanes": "./app/pager.js",
+  "pagerSetX": "./app/pager.js",
+  "pagerSnapToIndex": "./app/pager.js",
+  "buildPersistentPager": "./app/pager.js",
+  "paneTabId": "./app/pager.js",
+  "withTabScrollPreserved": "./app/pager.js",
+  "resetWindowScroll": "./app/pager.js",
+  "readPaneScroll": "./app/pager.js",
+  "restorePaneScroll": "./app/pager.js",
+  "journalCtx": "./app/pager.js",
+  "renderTabBody": "./app/pager.js",
+  "renderStudyTab": "./app/pager.js",
+  "softUpdateNav": "./app/pager.js",
+  "softUpdateTopLead": "./app/pager.js"
  }
 }
