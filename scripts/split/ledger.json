@@ -1,6 +1,8 @@
 {
  "modules": {
-  "ui": "lib/ui-feedback.js"
+  "ui": "lib/ui-feedback.js",
+  "constants": "lib/constants.js",
+  "state": "lib/app-state.js"
  },
  "names": {
   "UI_MOTION": "./lib/ui-feedback.js",
@@ -14,6 +16,36 @@
   "ensureToastWrap": "./lib/ui-feedback.js",
   "showToast": "./lib/ui-feedback.js",
   "paintFlashSlot": "./lib/ui-feedback.js",
-  "flash": "./lib/ui-feedback.js"
+  "flash": "./lib/ui-feedback.js",
+  "MORE_UI_V2": "./lib/constants.js",
+  "PROFILE_AVATARS": "./lib/constants.js",
+  "HW_EMPTY_QUIET": "./lib/constants.js",
+  "HW_TAB_BY_DAY": "./lib/constants.js",
+  "DAY_SWAP_MOTION": "./lib/constants.js",
+  "BOOT_SPLASH": "./lib/constants.js",
+  "BOOT_SPLASH_MIN_MS": "./lib/constants.js",
+  "BOOT_SPLASH_EXIT_MS": "./lib/constants.js",
+  "NAV_WITH_ICONS": "./lib/constants.js",
+  "NAV_ICONS": "./lib/constants.js",
+  "TAB_ORDER": "./lib/constants.js",
+  "PROGRAM_KINDS": "./lib/constants.js",
+  "READER_EASE": "./lib/constants.js",
+  "READER_SNAP_MS": "./lib/constants.js",
+  "MAX_NEWS_PHOTOS": "./lib/constants.js",
+  "FACULTY_LABEL": "./lib/constants.js",
+  "ROLE_LABEL": "./lib/constants.js",
+  "STAFF_KIND_LABEL": "./lib/constants.js",
+  "AUDIT_TITLES": "./lib/constants.js",
+  "ATT_LABEL": "./lib/constants.js",
+  "ROLE_RU": "./lib/constants.js",
+  "AUDIT_FILTERS": "./lib/constants.js",
+  "FORMATION_SKIP_SUBJECT": "./lib/constants.js",
+  "PULL_TO_REFRESH": "./lib/constants.js",
+  "SELECTED_GROUP_KEY": "./lib/app-state.js",
+  "THEME_KEY": "./lib/app-state.js",
+  "WEEK_MAX": "./lib/app-state.js",
+  "splashStartedAt": "./lib/app-state.js",
+  "state": "./lib/app-state.js",
+  "applyTheme": "./lib/app-state.js"
  }
 }

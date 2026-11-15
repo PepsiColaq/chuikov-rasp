@@ -59,33 +59,41 @@ function collect(node, fn) {
 }
 
 // имена, объявленные внутри поддерева (локальные, параметры и т.п.)
+function patternNames(p, out) {
+  if (!p) return out
+  switch (p.type) {
+    case 'Identifier':
+      out.add(p.name)
+      break
+    case 'AssignmentPattern':
+      patternNames(p.left, out)
+      break
+    case 'RestElement':
+      patternNames(p.argument, out)
+      break
+    case 'ObjectPattern':
+      for (const pr of p.properties) patternNames(pr.type === 'RestElement' ? pr.argument : pr.value, out)
+      break
+    case 'ArrayPattern':
+      for (const e of p.elements) patternNames(e, out)
+      break
+  }
+  return out
+}
+
 function localBindings(node) {
   const set = new Set()
   collect(node, (n) => {
-    if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier') set.add(n.id.name)
+    if (n.type === 'VariableDeclarator') patternNames(n.id, set)
     if (n.type === 'FunctionDeclaration' && n.id) set.add(n.id.name)
     if (n.type === 'FunctionExpression' && n.id) set.add(n.id.name)
     if (n.type === 'ClassExpression' && n.id) set.add(n.id.name)
     if (n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression') {
-      for (const p of n.params) {
-        if (p.type === 'Identifier') set.add(p.name)
-        else if (p.type === 'AssignmentPattern' && p.left.type === 'Identifier') set.add(p.left.name)
-        else if (p.type === 'RestElement' && p.argument.type === 'Identifier') set.add(p.argument.name)
-        else if (p.type === 'ObjectPattern')
-          p.properties.forEach((pr) => {
-            if (pr.value && pr.value.type === 'Identifier') set.add(pr.value.name)
-            if (pr.value && pr.value.type === 'AssignmentPattern' && pr.value.left.type === 'Identifier')
-              set.add(pr.value.left.name)
-          })
-        else if (p.type === 'ArrayPattern')
-          p.elements.forEach((e) => {
-            if (e && e.type === 'Identifier') set.add(e.name)
-          })
-      }
+      for (const p of n.params) patternNames(p, set)
     }
-    if (n.type === 'CatchClause' && n.param && n.param.type === 'Identifier') set.add(n.param.name)
+    if (n.type === 'CatchClause') patternNames(n.param, set)
     if ((n.type === 'ForOfStatement' || n.type === 'ForInStatement') && n.left.type === 'VariableDeclaration')
-      for (const dd of n.left.declarations) if (dd.id.type === 'Identifier') set.add(dd.id.name)
+      for (const dd of n.left.declarations) patternNames(dd.id, set)
   })
   return set
 }
@@ -149,12 +157,11 @@ function analyzeMain() {
     }
     if (!name) continue
 
-    // комментарий непосредственно над объявлением
+    // комментарий непосредственно над объявлением (без перескока через пустые строки)
     let first = node.loc.start.line
     for (let i = node.loc.start.line - 1; i >= 1; i--) {
       const t = lines[i - 1].trim()
-      if (t === '') continue
-      if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || t.endsWith('*/')) {
+      if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) {
         first = i
         continue
       }
@@ -262,7 +269,8 @@ const parts = []
 parts.push(cfg.header || `// ${cfg.file}`)
 parts.push('')
 
-for (const [src, names] of needFromModules) parts.push(`import { ${[...names].sort().join(', ')} } from '${src}'`)
+for (const [src, names] of needFromModules)
+  parts.push(`import { ${[...names].sort().join(', ')} } from '${relImport(src)}'`)
 for (const [src, names] of needFromLib) parts.push(`import { ${[...names].sort().join(', ')} } from '${relImport(src)}'`)
 if (needFromModules.size || needFromLib.size) parts.push('')
 
@@ -293,6 +301,21 @@ for (const name of cfg.names) {
   else if (d.kind === 'const') parts.push(text.replace(/^const\s/m, 'export const '))
   else if (d.kind === 'class') parts.push(text.replace(/^class\s/m, 'export class '))
   else throw new Error('Не понял, как экспортировать ' + name)
+  parts.push('')
+}
+
+// ── glue: куски кода верхнего уровня, которые обязаны переехать вместе с модулем
+// (например, обработчик beforeinstallprompt, который пишет в переносимую переменную)
+const glueBlocks = cfg.glue || []
+const glueTexts = []
+for (const g of glueBlocks) {
+  const idx = main0.src.indexOf(g.text)
+  if (idx < 0) throw new Error(`Не нашёл glue-блок в main.js: ${g.text.slice(0, 60)}…`)
+  if (main0.src.indexOf(g.text, idx + 1) >= 0) throw new Error(`Glue-блок встречается больше одного раза: ${g.text.slice(0, 60)}…`)
+  glueTexts.push(g.text)
+}
+for (const t of glueTexts) {
+  parts.push(t)
   parts.push('')
 }
 
@@ -397,7 +420,16 @@ for (const d of toCut) {
   if (srcLines[to] !== undefined && srcLines[to].trim() === '') to++
   srcLines.splice(d.commentFrom - 1, to - d.commentFrom + 1)
 }
-const newMain = srcLines.join('\n').replace(/\n{3,}/g, '\n\n')
+
+// glue-блоки вырезаем по тексту (они могут быть многострочными)
+let gluedMain = srcLines.join('\n')
+for (const t of glueTexts) {
+  const i = gluedMain.indexOf(t)
+  if (i < 0) throw new Error('Glue-блок потерялся при вырезании')
+  gluedMain = gluedMain.slice(0, i) + gluedMain.slice(i + t.length)
+}
+
+const newMain = gluedMain.replace(/\n{3,}/g, '\n\n')
 
 // ── импорт + подключение внедрённых функций
 const exportedNames = cfg.names.filter((n) => !internal.has(n)).slice().sort()

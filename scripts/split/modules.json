@@ -16,11 +16,103 @@
    "paintFlashSlot",
    "flash"
   ],
-  "inject": {
-   "render": "setRenderFn"
-  },
   "internal": [
    "toastWrap"
+  ],
+  "inject": {
+   "render": "setRenderFn"
+  }
+ },
+ "constants": {
+  "file": "lib/constants.js",
+  "header": "// Флаги и словари, которые нужны сразу нескольким экранам.\n// Раньше лежали вперемешку по 12 тысячам строк main.js — найти нужный\n// было почти невозможно. Значения не менялись при переносе.\n//\n// Флаги включения (UI_MOTION, BOOT_SPLASH, NAV_WITH_ICONS и т.п.) оставлены\n// намеренно: рядом с каждым в комментарии написано, что будет при false,\n// и где лежит бэкап прежнего поведения.",
+  "names": [
+   "MORE_UI_V2",
+   "PROFILE_AVATARS",
+   "HW_EMPTY_QUIET",
+   "HW_TAB_BY_DAY",
+   "DAY_SWAP_MOTION",
+   "BOOT_SPLASH",
+   "BOOT_SPLASH_MIN_MS",
+   "BOOT_SPLASH_EXIT_MS",
+   "NAV_WITH_ICONS",
+   "NAV_ICONS",
+   "TAB_ORDER",
+   "PROGRAM_KINDS",
+   "READER_EASE",
+   "READER_SNAP_MS",
+   "MAX_NEWS_PHOTOS",
+   "FACULTY_LABEL",
+   "ROLE_LABEL",
+   "STAFF_KIND_LABEL",
+   "AUDIT_TITLES",
+   "ATT_LABEL",
+   "ROLE_RU",
+   "AUDIT_FILTERS",
+   "FORMATION_SKIP_SUBJECT",
+   "PULL_TO_REFRESH"
+  ]
+ },
+ "state": {
+  "file": "lib/app-state.js",
+  "header": "// Состояние приложения и тема.\n//\n// state — один большой объект: экраны меняют его поля (state.tab = 'home'),\n// но сам объект не пересоздаётся. Поэтому его безопасно импортировать:\n// все модули видят одни и те же поля.\n//\n// Ключи localStorage вынесены сюда же: их читают и состояние, и выбор группы.",
+  "names": [
+   "SELECTED_GROUP_KEY",
+   "THEME_KEY",
+   "WEEK_MAX",
+   "splashStartedAt",
+   "state",
+   "applyTheme"
+  ]
+ },
+ "install": {
+  "file": "lib/install.js",
+  "header": "// Установка сайта на телефон (ярлык на экран «Домой»).\n// Chrome/Android умеет показать системное окно установки, iOS — только\n// инструкцию словами. Отсюда отдельный набор текстов под каждую платформу.",
+  "names": [
+   "isStandaloneApp",
+   "isIosDevice",
+   "isAndroidDevice",
+   "tryNativeInstall",
+   "installStepsNode",
+   "setInstallHelpOpen",
+   "renderInstallCard",
+   "deferredInstallPrompt",
+   "installPromptReady"
+  ],
+  "internal": [
+   "deferredInstallPrompt",
+   "installPromptReady"
+  ]
+ },
+ "time": {
+  "file": "lib/time.js",
+  "header": "// Работа с датой и временем: «сейчас идёт», «через 20 минут»,\n// границы недели, формат «14 ноября».\n//\n// Много мест, где раньше считали минуты вручную — теперь одна функция\n// на каждый случай, чтобы не расходились форматы.",
+  "names": [
+   "todayISO",
+   "hhmmToMinutes",
+   "nowMinutesOfDay",
+   "shortSubjectLabel",
+   "humanMins",
+   "dateForWeekday",
+   "calendarDateForWeekday",
+   "subtractMinutes",
+   "weekRangeLabel",
+   "formatDateRu",
+   "weekdayFromISO",
+   "weekdayNumFromIso",
+   "canEdit",
+   "normalizeSuggestKey",
+   "formatPhone",
+   "relativeTime",
+   "formatNewsDate",
+   "shortPersonName",
+   "typeLabel",
+   "teacherDateLabel",
+   "auditDate",
+   "auditWhen",
+   "auditGroupName",
+   "stripIds",
+   "roleRu"
   ]
  }
 }
