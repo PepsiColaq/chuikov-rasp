@@ -1,0 +1,322 @@
+
+/* ── Поиск группы: чипы факультетов/курсов, бейджи, пустой результат ── */
+.group-picker-count {
+  margin: 2px 0 8px;
+  font-size: 12.5px;
+}
+
+.group-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.group-chip-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.group-chip-row::-webkit-scrollbar {
+  display: none;
+}
+
+.group-chip {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.group-pick-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  font-size: 14.5px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.group-pick-btn + .group-pick-btn {
+  margin-top: 6px;
+}
+
+.group-pick-btn:active {
+  background: var(--accent-soft);
+}
+
+.group-hit-exact {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.group-pick-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.group-pick-main strong {
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.group-pick-main span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.group-pick-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.group-hit-typo .group-pick-badge {
+  background: color-mix(in srgb, var(--warn, #c47a12) 18%, transparent);
+  color: var(--warn, #c47a12);
+}
+
+.group-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 4px;
+}
+
+.group-empty-title {
+  margin: 0;
+  font-weight: 650;
+}
+
+.group-typo-hint {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: var(--warn, #b45309);
+  line-height: 1.35;
+}
+
+/* ── Подпись расхода и фокус без залипания ─────────────────────────── */
+.journal-report-stamp {
+  margin: 2px 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 1.35;
+}
+
+/* Рамка остаётся только при навигации с клавиатуры, не после тапа. */
+.journal-more-btn:focus,
+.seg button:focus,
+.grade-pill:focus,
+.grade-add:focus,
+.grade-pick:focus,
+.chip:focus {
+  outline: none;
+}
+
+.journal-more-btn:focus-visible,
+.seg button:focus-visible,
+.grade-pill:focus-visible,
+.grade-add:focus-visible,
+.grade-pick:focus-visible,
+.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Зум фото в просмотре события ──────────────────────────────────── */
+.news-reader-hero.is-zoomable {
+  touch-action: pan-y;
+}
+
+.news-reader-hero.is-zoomable .news-reader-cover {
+  transform-origin: center center;
+  will-change: transform;
+  transition: none;
+}
+
+.news-reader-hero.is-zoomed .news-reader-cover {
+  cursor: grab;
+}
+
+.news-reader-hero.is-zoomed {
+  overflow: hidden;
+}
+
+/* ── Главная: свой текст вместо «Пар нет» ──────────────────────────── */
+.home-now-title.is-custom {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+/* ── Сессия: пометка в расписании и календаре ──────────────────────── */
+.schedule-session-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 12.5px;
+}
+
+.schedule-session-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cal-cell.is-session:not(.is-selected) {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* ── Коды студентов (экран профиля) ────────────────────────────────── */
+.students-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.students-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.students-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.students-group-select,
+.students-search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.students-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.students-code-state {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.students-code-state.has-code {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.students-add {
+  margin-top: 8px;
+}
+
+/* ── Админка: галочки и импорт Excel ───────────────────────────────── */
+.admin-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.admin-check input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.import-file {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+  padding: 9px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.import-preview {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.import-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.import-stats span {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--surface-2, var(--accent-soft));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.import-stats span.is-warn {
+  background: color-mix(in srgb, var(--warn, #c47a12) 18%, transparent);
+  color: var(--warn, #c47a12);
+}
+
+.import-warn {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--warn, #c47a12);
+  line-height: 1.4;
+}
+
+.import-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.import-day {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  font-size: 11.5px;
+  min-width: 0;
+}
+
+.import-day strong {
+  font-size: 12px;
+}
+
+.import-day span {
+  color: var(--muted);
+}

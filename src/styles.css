@@ -3738,6 +3738,7 @@ html.ptr-on body {
   background: rgba(140, 30, 30, 0.58);
 }
 
+/* Точки-кнопки + белая плашка-бегунок поверх них */
 .home-hero .news-dots {
   position: absolute;
   left: 0;
@@ -3745,18 +3746,37 @@ html.ptr-on body {
   bottom: 9px;
   padding: 0;
   pointer-events: none;
+  align-items: center;
 }
 
 .home-hero .news-dot {
   pointer-events: auto;
   width: 6px;
   height: 6px;
+  min-width: 6px;
   background: rgba(255, 255, 255, 0.42);
+  transition: background-color 0.22s ease;
 }
 
+/* Активная точка остаётся точкой: длинный вид даёт плашка поверх неё. */
 .home-hero .news-dot.is-on {
-  background: #fff;
+  width: 6px;
+  min-width: 6px;
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.home-hero .news-dot-pill {
+  position: absolute;
+  left: 0;
+  top: 50%;
   width: 16px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 999px;
+  background: #fff;
+  pointer-events: none;
+  will-change: transform;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
 }
 
 /* Пустая карусель — только кнопка «добавить» */
@@ -5006,6 +5026,68 @@ html[data-theme='dark'] .home-feed-due.is-overdue {
 .diary-summary-value.is-2 { color: #c0392b; }
 
 /* Предмет: заголовок-кнопка, внутри — оценки */
+/* ── Раскрытие предмета: плавно, без перерисовки страницы ───────────── */
+.subject-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.3s cubic-bezier(0.22, 0.85, 0.25, 1), opacity 0.2s ease;
+}
+
+.subject-card.is-open .subject-body {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.subject-body-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.subject-head {
+  transition: background-color 0.2s ease;
+}
+
+.subject-chevron {
+  display: inline-block;
+  transition: transform 0.28s cubic-bezier(0.22, 0.85, 0.25, 1);
+}
+
+.subject-card.is-open .subject-chevron {
+  transform: rotate(180deg);
+}
+
+/* Скелетон, пока оценки грузятся: не белое поле, а намёк на карточки */
+.diary-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.diary-skeleton-row {
+  height: 58px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.12), rgba(148, 163, 184, 0.24), rgba(148, 163, 184, 0.12));
+  background-size: 200% 100%;
+  animation: diary-skeleton-shift 1.3s ease-in-out infinite;
+}
+
+@keyframes diary-skeleton-shift {
+  0% { background-position: 200% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subject-body,
+  .subject-head,
+  .subject-chevron {
+    transition: none;
+  }
+  .diary-skeleton-row {
+    animation: none;
+  }
+}
 .subject-card {
   padding: 0;
   margin-bottom: 0;
@@ -5870,8 +5952,29 @@ html[data-theme='dark'] .home-feed-due.is-overdue {
 
 .program-editor-pair {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, …) обязателен: у input[type=date] своя минимальная ширина,
+     и без него второй столбец («Срок») вылезал за экран на телефоне. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
+}
+
+.program-editor-pair > * {
+  min-width: 0;
+}
+
+.program-editor-pair input,
+.program-editor-pair select,
+.program-editor-pair textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 480px) {
+  .program-editor-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .program-editor-details {
@@ -6274,4 +6377,51 @@ html[data-theme='dark'] .home-feed-due.is-overdue {
   margin: -2px 0 2px;
   font-size: 11.5px;
   line-height: 1.4;
+}
+/* ── Куратор: выбор нескольких групп галочками ─────────────────────── */
+.curator-groups-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.curator-group-pick {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background-color 0.16s ease;
+}
+
+.curator-group-pick:active {
+  background: var(--accent-soft);
+}
+
+.curator-group-pick input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.curator-group-all {
+  font-weight: 650;
+  border-bottom: 1px solid var(--line);
+  border-radius: 9px 9px 0 0;
+  margin-bottom: 3px;
+}
+
+.curator-groups-list {
+  display: flex;
+  flex-direction: column;
 }

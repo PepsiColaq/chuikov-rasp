@@ -44,6 +44,45 @@ function gradeClass(value, attendance) {
   return 'grade-bad'
 }
 
+/** «Новикова Анна» → «Новикова А.» — в подписи расхода места мало. */
+export function shortAuthor(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return ''
+  if (parts.length === 1) return parts[0]
+  return `${parts[0]} ${parts[1].charAt(0)}.`
+}
+
+/** Время отметки «08:41» (локальное). Пусто, если дата битая. */
+function clockOf(iso) {
+  const t = Date.parse(String(iso || ''))
+  if (!Number.isFinite(t)) return ''
+  const d = new Date(t)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/**
+ * Подпись под заголовком расхода: полный он или частичный, кто отмечал и когда.
+ *
+ * @param {Array<{attendance?:string, author?:string, updatedAt?:string}>} marks
+ * @param {number} total — сколько человек в списке
+ * @returns {string} '' — ещё ничего не отмечено
+ */
+export function reportStampLine(marks, total) {
+  const list = (marks || []).filter(Boolean)
+  const marked = list.filter((m) => m.attendance).length
+  if (!marked) return ''
+  const last = list
+    .filter((m) => m.attendance && m.updatedAt)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0]
+  const who = shortAuthor(last?.author)
+  const at = clockOf(last?.updatedAt)
+  const head =
+    marked >= Number(total || list.length)
+      ? 'Расход составлен'
+      : `Расход составлен частично · ${marked} из ${total || list.length}`
+  return [head, who, at].filter(Boolean).join(' · ')
+}
+
 export function renderGradesTab(ctx) {
   const session = getSession()
   const wrap = el('div', { className: 'panel grades-panel' })
@@ -530,9 +569,7 @@ export function renderJournalOverlay(ctx) {
   }
   const group = ctx.getGroup(spec.groupId)
   const dayLessons = group
-    ? ctx
-        .getLessons(group.id)
-        .filter((l) => lessonMatchesDate(ctx, l, spec.date))
+    ? (ctx.lessonsOn ? ctx.lessonsOn(group.id, spec.date) : ctx.getLessons(group.id).filter((l) => lessonMatchesDate(ctx, l, spec.date)))
     : []
   const close = () => {
     ctx.state.journal = null
@@ -688,7 +725,9 @@ function paintTools(ctx, spec, group, students, byStudent, prev, allMarks, tools
             comment: mark?.comment || '',
           }
         })
-        const text = buildJournalReport(group?.name || '', people)
+        const stamp = reportStampLine([...byStudent.values()], students.length)
+        const body = buildJournalReport(group?.name || '', people)
+        const text = stamp ? `${stamp}\n\n${body}` : body
         try {
           await navigator.clipboard.writeText(text)
           ctx.flash('Текст расхода скопирован')
@@ -698,8 +737,12 @@ function paintTools(ctx, spec, group, students, byStudent, prev, allMarks, tools
       },
     }),
   )
+  const stamp = reportStampLine([...byStudent.values()], students.length)
   tools.append(
     links,
+    stamp
+      ? el('p', { className: 'journal-report-stamp', text: stamp })
+      : null,
     el('p', {
       className: 'muted journal-hint',
       text: 'Сначала пусто. «+» — был, «н» — нет. Пока не отмечен, в «на лицо» не попадает.',
@@ -882,11 +925,273 @@ function renderCodesScreen(ctx, spec, students, reload) {
   return box
 }
 
+/**
+ * Отдельный экран «Коды студентов» — из профиля, без входа в журнал пары.
+ *
+ * Раньше коды выдавались только через журнал конкретной пары: чтобы добавить
+ * новому студенту код, старосте приходилось искать любую пару. Здесь — выбор
+ * группы, поиск по фамилии и всё то же самое.
+ *
+ * @param {{
+ *   groupId: string,
+ *   groups?: Array<{id:string,name:string}>,
+ *   onPickGroup?: (id:string)=>void,
+ *   onBack?: ()=>void,
+ *   flash?: (text:string, isError?:boolean)=>void,
+ * }} opts
+ */
+export function renderStudentsScreen(opts = {}) {
+  const flash = typeof opts.flash === 'function' ? opts.flash : () => {}
+  let groupId = String(opts.groupId || '')
+  const groups = Array.isArray(opts.groups) ? opts.groups : []
+  let students = []
+  let query = ''
+  let openId = ''
+  let busy = false
+  let loading = true
+  let error = ''
+
+  const box = el('div', { className: 'journal-codes-screen students-screen' })
+  const list = el('div', { className: 'students-list' })
+
+  const head = el('div', { className: 'students-head' })
+  const search = el('input', {
+    type: 'search',
+    placeholder: 'Фамилия',
+    autocomplete: 'off',
+    enterKeyHint: 'search',
+    className: 'students-search',
+  })
+  search.addEventListener('input', () => {
+    query = search.value
+    paint()
+  })
+
+  const paintHead = () => {
+    head.replaceChildren()
+    if (typeof opts.onBack === 'function') {
+      head.append(
+        el('button', {
+          type: 'button',
+          className: 'btn secondary',
+          text: '← Профиль',
+          onClick: () => opts.onBack(),
+        }),
+      )
+    }
+    head.append(el('h2', { text: 'Коды студентов' }))
+    if (groups.length > 1) {
+      const select = el('select', { className: 'students-group-select' })
+      for (const g of groups) {
+        const opt = el('option', { value: g.id, text: g.name })
+        if (g.id === groupId) opt.selected = true
+        select.append(opt)
+      }
+      select.addEventListener('change', () => {
+        groupId = select.value
+        openId = ''
+        query = ''
+        search.value = ''
+        if (typeof opts.onPickGroup === 'function') opts.onPickGroup(groupId)
+        void load()
+      })
+      head.append(select)
+    } else {
+      const g = groups.find((x) => x.id === groupId)
+      if (g) head.append(el('p', { className: 'muted', text: g.name }))
+    }
+    head.append(search)
+  }
+
+  const load = async () => {
+    loading = true
+    error = ''
+    paint()
+    try {
+      students = await listStudents(groupId)
+    } catch (err) {
+      students = []
+      error = err?.message || 'Не удалось загрузить список'
+    } finally {
+      loading = false
+      paint()
+    }
+  }
+
+  const matches = () => {
+    const q = query.trim().toLowerCase()
+    if (!q) return students
+    return students.filter((s) =>
+      String(s.surname || s.fullName || s.fullname || '')
+        .toLowerCase()
+        .includes(q),
+    )
+  }
+
+  const paint = () => {
+    list.replaceChildren()
+    if (loading) {
+      list.append(el('p', { className: 'muted', text: 'Загружаем…' }))
+      return
+    }
+    if (error) {
+      list.append(
+        el('p', {
+          className: 'journal-error',
+          text:
+            /stude/i.test(error)
+              ? 'Нет таблицы студентов — выполни supabase/journal.sql в Supabase.'
+              : error,
+        }),
+      )
+    }
+    const rows = matches()
+    if (!rows.length) {
+      list.append(
+        el('p', {
+          className: 'muted',
+          text: query ? 'Никого не нашли по фамилии.' : 'В группе пока нет студентов — добавь ниже.',
+        }),
+      )
+    }
+    rows.forEach((student, index) => {
+      const open = openId === student.id
+      const hasCode = student.hasCode === true || student.hascode === true
+      const role = String(student.role || 'student')
+      const row = el('article', { className: 'journal-code-row' })
+      row.append(
+        el(
+          'button',
+          {
+            type: 'button',
+            className: 'journal-code-person',
+            onClick: (e) => {
+              e.currentTarget.blur()
+              openId = open ? '' : student.id
+              paint()
+            },
+          },
+          [
+            el('span', { className: 'journal-num', text: String(index + 1) }),
+            el('span', { text: personSurname(student) }),
+            role !== 'student'
+              ? el('span', {
+                  className: 'journal-tag',
+                  text: role === 'teacher' ? 'препод' : 'староста',
+                })
+              : null,
+            el('span', {
+              className: `students-code-state${hasCode ? ' has-code' : ''}`,
+              text: hasCode ? (student.shared ? 'общий' : 'код есть') : 'без кода',
+            }),
+          ],
+        ),
+      )
+
+      if (open) {
+        const input = el('input', {
+          maxlength: '64',
+          placeholder: 'Код, от 8 символов',
+          autocomplete: 'off',
+          value: '',
+        })
+        const form = el('form', { className: 'journal-add' })
+        form.append(
+          input,
+          el('button', {
+            type: 'button',
+            className: 'journal-link',
+            text: 'Случайный',
+            onClick: () => {
+              input.value = newStudentCode()
+            },
+          }),
+          el('button', { type: 'submit', className: 'journal-link', text: 'Сохранить' }),
+        )
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault()
+          const code = input.value.trim()
+          if (code.length < 8) {
+            flash('Минимум 8 символов', true)
+            return
+          }
+          if (busy) return
+          busy = true
+          try {
+            const saved = await setStudentCode(student.id, code)
+            flash(saved?.shared ? 'Сохранено. Код общий — при входе нужна фамилия.' : 'Код сохранён.')
+            openId = ''
+            await load()
+          } catch (err) {
+            flash(err.message, true)
+          } finally {
+            busy = false
+          }
+        })
+
+        const roleRow = el('div', { className: 'due-quick role-picker' })
+        for (const [id, label] of [
+          ['student', 'Студент'],
+          ['starosta', 'Староста'],
+          ['teacher', 'Препод'],
+        ]) {
+          roleRow.append(
+            el('button', {
+              type: 'button',
+              className: `chip${role === id ? ' chip-active' : ''}`,
+              text: label,
+              onClick: async (e) => {
+                e.currentTarget.blur()
+                if (role === id) return
+                try {
+                  await setStudentRole(student.id, id)
+                  flash(`${personSurname(student)} — ${label.toLowerCase()}`)
+                  await load()
+                } catch (err) {
+                  flash(err.message, true)
+                }
+              },
+            }),
+          )
+        }
+        row.append(form, roleRow)
+      }
+      list.append(row)
+    })
+
+    const name = el('input', { maxlength: '120', placeholder: 'Фамилия Имя' })
+    const add = el('form', { className: 'journal-add students-add' })
+    add.append(name, el('button', { className: 'journal-link', type: 'submit', text: 'Добавить студента' }))
+    add.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      if (!name.value.trim()) {
+        flash('Напиши фамилию и имя', true)
+        return
+      }
+      try {
+        await addStudent(groupId, name.value)
+        name.value = ''
+        flash('Студент добавлен')
+        await load()
+      } catch (err) {
+        flash(err.message, true)
+      }
+    })
+    list.append(add)
+  }
+
+  paintHead()
+  box.append(head, list)
+  void load()
+  return box
+}
+
 function cleanText(value) {
   const text = String(value ?? '').trim()
   if (!text || text === 'null' || text === 'undefined') return ''
   return text
 }
+
 
 export function personSurname(student) {
   const surname = cleanText(student?.surname)
@@ -1038,7 +1343,11 @@ function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, re
           type: 'button',
           className: att === id ? 'on' : '',
           text: label,
-          onClick: () => save({ attendance: att === id ? '' : id }),
+          onClick: (e) => {
+            // На телефоне фокус остаётся на кнопке и рамка «залипает».
+            e.currentTarget.blur()
+            save({ attendance: att === id ? '' : id })
+          },
         }),
       )
     }
@@ -1097,7 +1406,8 @@ function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, re
       title: 'Комментарий и другие отметки',
       'aria-label': open ? 'Свернуть' : 'Комментарий и другие отметки',
       'aria-expanded': open ? 'true' : 'false',
-      onClick: () => {
+      onClick: (e) => {
+        e.currentTarget.blur()
         ctx.state.journalNoteId = open ? '' : student.id
         repaint()
       },

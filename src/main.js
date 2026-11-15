@@ -1,4 +1,5 @@
 import './styles.css'
+import './styles-v150.css'
 import { el } from './lib/security.js'
 import { breakMinutes, DAY_NAMES, DAY_SHORT } from './data/seed.js'
 import {
@@ -80,12 +81,20 @@ import {
   saveProgram,
   deleteProgram,
   moveProgram,
+  lessonsForDate,
+  getSessionLessons,
+  getSessionInfo,
+  getAppSettings,
+  setAppSettings,
+  importSessionLessons,
+  deleteSessionBatch,
 } from './lib/store.js'
 import {
   canGradeGroup,
   getFormationDay,
   setFormationCancelled,
   setFormationMark,
+  formationAutofill,
   listAdmins,
   addAdmin,
   revokeAdmin,
@@ -94,6 +103,9 @@ import {
   groupmates,
   setMyContacts,
   listStudents,
+  setStudentCode,
+  addStudent,
+  setStudentRole,
   setOwnStudentCode,
   staffList,
   staffSet,
@@ -107,6 +119,8 @@ import {
   personSurname,
   personRest,
   markStampLine,
+  reportStampLine,
+  renderStudentsScreen,
 } from './journal-ui.js'
 import {
   supabaseConfigured,
@@ -115,6 +129,19 @@ import {
   fetchStorageObjectUrl,
   checkConnectivity,
 } from './lib/supabase.js'
+import {
+  searchGroups,
+  pickExactGroup,
+  suggestGroupName,
+  listFacultyKeys,
+  listCourseKeys,
+} from './lib/group-match.js'
+import { readXlsx } from './lib/xlsx.js'
+import {
+  parseScheduleBook,
+  resolveShift,
+  groupByDate,
+} from './lib/schedule-import.js'
 import { privacyParagraphs, termsParagraphs } from './lib/legal.js'
 
 const SELECTED_GROUP_KEY = 'rasp_selected_group_v3'
@@ -2021,8 +2048,39 @@ function isLessonInPerson(lesson, view) {
   return true
 }
 
-/** Построение: за 15 мин до первой очной (не отменённой) пары. */
+/** Факультет группы: поле faculty, а если оно пустое — по названию. */
+function facultyOfGroup(group) {
+  const raw = String(group?.faculty || '').trim().toUpperCase()
+  if (raw) return raw
+  return String(facultyFromName(group?.name || '')).toUpperCase()
+}
+
+/**
+ * Есть ли у группы построение.
+ * Список факультетов приходит из настроек сайта: по умолчанию ПД и МЧС.
+ * Сравниваем и по факультету, и по названию — в базе faculty бывает пустым.
+ */
+function groupHasFormation(group) {
+  if (!group) return false
+  const settings = getAppSettings()
+  const allowed = (settings.formationFaculties || []).map((x) => String(x).toUpperCase())
+  if (!allowed.length) return false
+  const byField = String(group.faculty || '').toUpperCase()
+  if (byField && allowed.includes(byField)) return true
+  const name = String(group.name || '').toUpperCase()
+  return allowed.some((f) => f && name.includes(f))
+}
+
+/** Построение: за несколько минут до первой очной (не отменённой) пары. */
 function resolveFormation(groupId, dateStr, lessons) {
+  const group = getGroup(groupId)
+  if (!groupHasFormation(group)) {
+    return { show: false, reason: 'faculty' }
+  }
+  // В сессию построений нет: на экзаменационный день карточка только мешает.
+  if ((lessons || []).length && lessons.every((l) => l.session)) {
+    return { show: false, reason: 'session' }
+  }
   const overs = getOverridesForDate(groupId, dateStr)
   const inPerson = (lessons || []).filter((l) => {
     const ov = overs.find((o) => o.lessonId === l.id)
@@ -2031,6 +2089,10 @@ function resolveFormation(groupId, dateStr, lessons) {
   if (!inPerson.length) {
     return { show: false, reason: 'no_campus' }
   }
+  const settings = getAppSettings()
+  const lead = Number.isFinite(Number(settings.formationAutofillMinutes))
+    ? Math.max(0, Math.min(120, Number(settings.formationAutofillMinutes)))
+    : 15
   const anchor = inPerson[0]
   return {
     show: true,
@@ -2038,8 +2100,9 @@ function resolveFormation(groupId, dateStr, lessons) {
     skipped: !!state.formationDay?.cancelled,
     note: state.formationDay?.note || '',
     anchorStart: anchor.start,
-    formStart: subtractMinutes(anchor.start, 15),
+    formStart: subtractMinutes(anchor.start, lead),
     anchorSubject: anchor.subject,
+    leadMinutes: lead,
   }
 }
 
@@ -2088,7 +2151,7 @@ function renderFormationCard(groupId, dateStr, formation) {
         el('p', { className: 'lesson-subject', text: 'Построение' }),
         el('div', {
           className: 'lesson-meta',
-          text: `плац · за 15 мин до первой очной пары (${formation.anchorStart})`,
+          text: `плац · за ${formation.leadMinutes ?? 15} мин до первой очной пары (${formation.anchorStart})`,
         }),
       ]),
       el('div', { className: 'lesson-time', text: formation.formStart }),
@@ -2188,6 +2251,14 @@ function renderFormationMarksOverlay() {
 
   const paint = async () => {
     try {
+      // Автоотметка: сервер сам решит, наступило ли время и включён ли режим.
+      if (!spec.autoChecked) {
+        spec.autoChecked = true
+        const auto = await formationAutofill(spec.groupId, spec.date)
+        if (auto?.filled > 0) {
+          flash(`Автоотметка: «н» поставили ${auto.filled} чел.`)
+        }
+      }
       const [students, day] = await Promise.all([
         listStudents(spec.groupId),
         getFormationDay(spec.groupId, spec.date),
@@ -2227,6 +2298,7 @@ function renderFormationMarksOverlay() {
 function paintFormationTools(spec, group, students, byStudent, tools, reload) {
   tools.replaceChildren()
   const links = el('div', { className: 'journal-links' })
+  const stamp = reportStampLine([...byStudent.values()], students.length)
   links.append(
     el('button', {
       type: 'button',
@@ -2238,9 +2310,12 @@ function paintFormationTools(spec, group, students, byStudent, tools, reload) {
         const unmarked = students.filter((s) => !byStudent.get(s.id)?.attendance)
         const lines = [
           `Построение ${group?.name || ''} · ${formatDateRu(spec.date)}:`,
+        ]
+        if (stamp) lines.push(stamp)
+        lines.push(
           `По списку: ${students.length}`,
           `На построении: ${present.length}`,
-        ]
+        )
         if (unmarked.length) lines.push(`Не отмечены: ${unmarked.length}`)
         if (absent.length) {
           lines.push(`Отсутствуют: ${absent.length}`)
@@ -2263,6 +2338,7 @@ function paintFormationTools(spec, group, students, byStudent, tools, reload) {
   )
   tools.append(
     links,
+    stamp ? el('p', { className: 'journal-report-stamp', text: stamp }) : null,
     el('p', {
       className: 'muted journal-hint',
       text: 'Отмечай только построение. Оценки и пары — в журнале пары.',
@@ -2281,10 +2357,13 @@ function paintFormationRows(spec, students, byStudent, list, reload) {
     const mark = byStudent.get(student.id) || { attendance: '', comment: '', author: '', updatedAt: '' }
     const save = async (attendance) => {
       const next = attendance === mark.attendance ? '' : attendance
-      byStudent.set(student.id, { ...mark, attendance: next })
+      // Причина нужна только когда человек отсутствует. Если вернули «+» —
+      // старую причину стираем, чтобы она не висела у явившегося.
+      const keepComment = next && next !== 'present' ? mark.comment || '' : ''
+      byStudent.set(student.id, { ...mark, attendance: next, comment: keepComment })
       repaint()
       try {
-        const saved = await setFormationMark(student.id, spec.date, next, mark.comment || '')
+        const saved = await setFormationMark(student.id, spec.date, next, keepComment)
         const cur = byStudent.get(student.id)
         if (cur) {
           if (saved?.author) cur.author = saved.author
@@ -2312,24 +2391,33 @@ function paintFormationRows(spec, students, byStudent, list, reload) {
           type: 'button',
           className: mark.attendance === id ? 'on' : '',
           text: label,
-          onClick: () => void save(id),
+          onClick: (e) => {
+            e.currentTarget.blur()
+            void save(id)
+          },
         }),
       )
     }
-    const comment = el('input', {
-      maxlength: '200',
-      placeholder: 'Причина',
-      value: mark.comment || '',
-    })
-    comment.addEventListener('change', async () => {
-      const value = comment.value
-      byStudent.set(student.id, { ...mark, comment: value })
-      try {
-        await setFormationMark(student.id, spec.date, mark.attendance || '', value)
-      } catch (err) {
-        flash(err.message, true)
-      }
-    })
+    // «Причина» есть только у отсутствия: у «+» её быть не может.
+    const needsReason = !!mark.attendance && mark.attendance !== 'present'
+    const comment = needsReason
+      ? el('input', {
+          maxlength: '200',
+          placeholder: 'Причина',
+          value: mark.comment || '',
+        })
+      : null
+    if (comment) {
+      comment.addEventListener('change', async () => {
+        const value = comment.value
+        byStudent.set(student.id, { ...mark, comment: value })
+        try {
+          await setFormationMark(student.id, spec.date, mark.attendance || '', value)
+        } catch (err) {
+          flash(err.message, true)
+        }
+      })
+    }
     const stampText = markStampLine({ author: mark.author, updatedAt: mark.updatedAt })
     list.append(
       el('article', { className: 'journal-row' }, [
@@ -2347,8 +2435,10 @@ function paintFormationRows(spec, students, byStudent, list, reload) {
 
 function renderSchedule() {
   const group = getGroup(state.groupId)
-  const lessons = getLessons(group.id, state.day)
   const dateStr = dateForWeekday(state.day)
+  // В сессию на дате стоят «свои» пары — недельный шаблон на этот день не показываем.
+  const lessons = group ? lessonsForDate(group.id, dateStr) : []
+  const sessionMode = !!(group && getSessionLessons(group.id, dateStr).length)
   loadFormationDay(group.id, dateStr)
   const nowStatus = getScheduleNowStatus(group.id, dateStr, lessons)
   const liveId = nowStatus?.kind === 'now' ? nowStatus.lesson?.id : null
@@ -2359,10 +2449,21 @@ function renderSchedule() {
     }),
   ])
 
-  // Построение: за 15 мин до первой очной пары (учитывает отмены и дистант).
-  // Полностью выключить: SHOW_FORMATION = false
-  const SHOW_FORMATION = true
-  const formation = SHOW_FORMATION ? resolveFormation(group.id, dateStr, lessons) : null
+  if (sessionMode) {
+    const info = getSessionInfo()
+    frag.append(
+      el('div', { className: 'schedule-session-note' }, [
+        el('span', { className: 'schedule-session-badge', text: 'Сессия' }),
+        el('span', {
+          className: 'muted',
+          text: info.label || 'расписание экзаменов на эту дату',
+        }),
+      ]),
+    )
+  }
+
+  // Построение: за N мин до первой очной пары (учитывает отмены и дистант).
+  const formation = resolveFormation(group.id, dateStr, lessons)
 
   const strip = renderNowStrip(nowStatus, formation, dateStr)
   if (strip) frag.append(strip)
@@ -2377,7 +2478,12 @@ function renderSchedule() {
     if (card) {
       frag.append(card)
       if (!formation.skipped) {
-        frag.append(el('div', { className: 'break-line', text: '15 мин до пары' }))
+        frag.append(
+          el('div', {
+            className: 'break-line',
+            text: `${formation.leadMinutes ?? 15} мин до пары`,
+          }),
+        )
       }
     }
   }
@@ -2427,8 +2533,11 @@ function renderMonthCalendar() {
     const dow = date.getDay() || 7
     const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     const isToday = iso === todayStr
-    const isWeekend = dow === 7 || (dow === 6 && !hasSat)
-    const lessons = isWeekend ? [] : getLessons(group.id, dow)
+    // Сессия может стоять и в субботу — приоритет у конкретной даты.
+    const dayLessons = lessonsForDate(group.id, iso)
+    const hasSession = dayLessons.some((l) => l.session)
+    const isWeekend = !hasSession && (dow === 7 || (dow === 6 && !hasSat))
+    const lessons = dayLessons
     const thisWeekStart = dateForWeekday(1, state.weekOffset)
     const selected = iso === dateForWeekday(state.day, state.weekOffset)
 
@@ -2448,6 +2557,7 @@ function renderMonthCalendar() {
             isToday ? 'is-today' : '',
             selected ? 'is-selected' : '',
             isWeekend ? 'is-weekend' : '',
+            hasSession ? 'is-session' : '',
             lessons.length ? 'has-lessons' : '',
           ]
             .filter(Boolean)
@@ -3866,39 +3976,159 @@ function renderOverridesTab(group) {
 }
 
 function renderGroupPicker() {
-  const wrap = el('div', { className: 'panel' })
-  const q = el('input', { type: 'search', placeholder: 'Поиск группы…' })
+  const wrap = el('div', { className: 'panel group-picker' })
+  const all = listGroups()
+  const q = el('input', {
+    type: 'search',
+    placeholder: '0903-ПД5 или просто пд5',
+    autocomplete: 'off',
+    autocapitalize: 'characters',
+    spellcheck: 'false',
+    enterKeyHint: 'go',
+  })
   const list = el('div', { className: 'group-list' })
+  const filters = el('div', { className: 'group-filters' })
+  const countLine = el('p', { className: 'muted group-picker-count' })
+  const chosen = { faculty: '', course: '' }
+
+  const paintChips = () => {
+    filters.replaceChildren()
+    const faculties = listFacultyKeys(all)
+    const courses = listCourseKeys(all)
+    if (faculties.length > 1) {
+      filters.append(
+        el(
+          'div',
+          { className: 'group-chip-row' },
+          [['', 'Все']].concat(faculties.map((f) => [f, f])).map(([id, label]) =>
+            el('button', {
+              type: 'button',
+              className: `chip group-chip${chosen.faculty === id ? ' chip-active' : ''}`,
+              text: label,
+              title: id && FACULTY_LABEL[id] ? FACULTY_LABEL[id] : '',
+              onClick: () => {
+                hapticTap()
+                chosen.faculty = chosen.faculty === id ? '' : id
+                paintChips()
+                paint()
+              },
+            }),
+          ),
+        ),
+      )
+    }
+    if (courses.length > 1) {
+      filters.append(
+        el(
+          'div',
+          { className: 'group-chip-row' },
+          [['', 'Все курсы']].concat(courses.map((c) => [c, c])).map(([id, label]) =>
+            el('button', {
+              type: 'button',
+              className: `chip group-chip${chosen.course === id ? ' chip-active' : ''}`,
+              text: label,
+              onClick: () => {
+                hapticTap()
+                chosen.course = chosen.course === id ? '' : id
+                paintChips()
+                paint()
+              },
+            }),
+          ),
+        ),
+      )
+    }
+  }
+
   const paint = () => {
     list.replaceChildren()
-    const query = q.value.trim().toLowerCase()
-    for (const g of listGroups()) {
-      if (query && !g.name.toLowerCase().includes(query)) continue
+    const query = q.value.trim()
+    let hits = searchGroups(all, query, chosen)
+    // Нашлось точное — не заваливаем человека списком «похоже»: оставляем
+    // точное совпадение и пару соседей, чтобы можно было выбрать другое.
+    if (hits.length > 4 && hits[0].why === 'exact') hits = hits.slice(0, 4)
+    countLine.textContent =
+      query || chosen.faculty || chosen.course ? `Найдено: ${hits.length}` : `Групп: ${all.length}`
+
+    if (!hits.length) {
+      const guess = suggestGroupName(all, query)
+      const guessId = guess ? findGroupByName(guess)?.id : ''
+      list.append(
+        el('div', { className: 'group-empty' }, [
+          el('p', { className: 'group-empty-title', text: 'Ничего не нашли' }),
+          el('p', {
+            className: 'muted',
+            text: query
+              ? 'Проверь номер: обычно это 0903-ПД5. Тире можно не ставить.'
+              : 'Попробуй снять фильтры выше.',
+          }),
+          guessId
+            ? el('button', {
+                type: 'button',
+                className: 'btn secondary',
+                text: `Может, это ${guess}?`,
+                onClick: (e) => pickGroupWithFeel(guessId, e.currentTarget),
+              })
+            : null,
+        ]),
+      )
+      return
+    }
+
+    for (const hit of hits) {
+      const g = hit.group
+      const badge = hit.why === 'exact' ? 'точное' : hit.why === 'typo' ? 'похоже' : ''
       list.append(
         el(
           'button',
           {
             type: 'button',
-            className: 'group-pick-btn',
+            className: `group-pick-btn group-hit-${hit.why}`,
             onClick: (e) => pickGroupWithFeel(g.id, e.currentTarget),
           },
           [
-            el('strong', { text: g.name }),
-            el('span', { text: g.faculty ? `Факультет ${g.faculty}` : ' ' }),
+            el('span', { className: 'group-pick-main' }, [
+              el('strong', { text: g.name }),
+              el('span', {
+                text: g.faculty ? FACULTY_LABEL[g.faculty] || `Факультет ${g.faculty}` : ' ',
+              }),
+            ]),
+            badge ? el('span', { className: 'group-pick-badge', text: badge }) : null,
           ],
         ),
       )
     }
+
+    // Всё «похоже», а точного нет — даём явную подсказку, чтобы не гадать.
+    if (query && hits.length && hits[0].why === 'typo') {
+      list.prepend(
+        el('p', {
+          className: 'group-typo-hint',
+          text: `Точного «${query}» нет. Ближе всего:`,
+        }),
+      )
+    }
   }
+
   q.addEventListener('input', paint)
+  q.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const target = pickExactGroup(all, q.value) || searchGroups(all, q.value, chosen)[0]?.group
+    if (target) pickGroupWithFeel(target.id, null)
+  })
+
+  paintChips()
   paint()
   wrap.append(
     el('p', {
       className: 'muted',
       style: 'margin:0 0 10px',
-      text: 'Выбери свою группу. Если нажал случайно — «Назад» справа сверху.',
+      text: 'Начни набирать номер — тире, регистр и пара опечаток не важны. Если нажал случайно — «Назад» справа сверху.',
     }),
     el('div', { className: 'search' }, [q]),
+    filters,
+    countLine,
     list,
   )
   return wrap
@@ -4002,6 +4232,503 @@ function wrapAdminAcc(id, title, bodyNodes) {
   }
   return block
 }
+
+/* ── Настройки сайта в админке ─────────────────────────────────────── */
+
+/** Обёртка «сохранить и перерисовать» с единой обработкой ошибок. */
+async function saveAppSettings(patch, okText) {
+  try {
+    await setAppSettings(patch)
+    flash(okText || 'Сохранено')
+    render({ force: true })
+    if (refreshTabPanes(['home'])) softUpdateNav()
+    return true
+  } catch (err) {
+    flash(err.message, true)
+    return false
+  }
+}
+
+/** Текст вместо «Пар нет» на главной + сколько его держать. */
+function renderHomeTextSettings() {
+  const settings = getAppSettings()
+  const input = el('input', {
+    maxlength: '120',
+    placeholder: 'Например: Каникулы до 8 февраля',
+    value: settings.homeNoLessonsText || '',
+  })
+  // «Бессрочно» хранится пустой строкой; иначе пишем конкретный момент времени.
+  const when = el('select', {})
+  for (const [value, label] of [
+    ['forever', 'Бессрочно (пока не сменишь)'],
+    ['1', '1 час'],
+    ['3', '3 часа'],
+    ['day', 'До конца дня'],
+    ['custom', 'До даты и времени'],
+  ]) {
+    const opt = el('option', { value, text: label })
+    if (settings.homeNoLessonsUntil) {
+      if (value === 'custom') opt.selected = true
+    } else if (value === 'forever') {
+      opt.selected = true
+    }
+    when.append(opt)
+  }
+  const custom = el('input', { type: 'datetime-local', value: '' })
+  custom.style.display = settings.homeNoLessonsUntil ? '' : 'none'
+  when.addEventListener('change', () => {
+    custom.style.display = when.value === 'custom' ? '' : 'none'
+  })
+  if (settings.homeNoLessonsUntil) {
+    const t = Date.parse(settings.homeNoLessonsUntil)
+    if (Number.isFinite(t)) {
+      const d = new Date(t)
+      const pad = (n) => String(n).padStart(2, '0')
+      custom.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    }
+  }
+
+  const computeUntil = () => {
+    const now = Date.now()
+    if (when.value === 'forever') return ''
+    if (when.value === '1') return new Date(now + 3600 * 1000).toISOString()
+    if (when.value === '3') return new Date(now + 3 * 3600 * 1000).toISOString()
+    if (when.value === 'day') {
+      const d = new Date()
+      d.setHours(23, 59, 0, 0)
+      return d.toISOString()
+    }
+    if (!custom.value) return ''
+    const t = Date.parse(custom.value)
+    return Number.isFinite(t) ? new Date(t).toISOString() : ''
+  }
+
+  const active = homeNoLessonsText()
+  const status = el('p', {
+    className: 'muted',
+    style: 'margin:0;font-size:12.5px',
+    text: settings.homeNoLessonsText
+      ? active
+        ? `Сейчас на главной: «${active}»${settings.homeNoLessonsUntil ? ` · до ${formatDateRu(String(settings.homeNoLessonsUntil).slice(0, 10))}` : ' · бессрочно'}`
+        : 'Срок истёк — показывается обычное «Пар нет».'
+      : 'Сейчас показывается обычное «Пар нет».',
+  })
+
+  const box = el('div', {}, [
+    el('h3', { style: 'margin:0 0 6px;font-size:15px', text: 'Вместо «Пар нет»' }),
+    el('p', {
+      className: 'muted',
+      style: 'margin:0 0 10px;font-size:12.5px',
+      text: 'Свой текст на главной, когда на сегодня пар нет. Пустое поле — обычное «Пар нет».',
+    }),
+    el('div', { className: 'field' }, [el('label', { text: 'Текст' }), input]),
+    el('div', { className: 'field' }, [el('label', { text: 'Сколько держать' }), when]),
+    el('div', { className: 'field' }, [el('label', { text: 'До (дата и время)' }), custom]),
+    el('div', { style: 'display:flex;gap:10px;flex-wrap:wrap' }, [
+      el('button', {
+        type: 'button',
+        className: 'btn secondary',
+        text: 'Сохранить',
+        onClick: () =>
+          saveAppSettings(
+            { homeNoLessonsText: input.value || '', homeNoLessonsUntil: computeUntil() },
+            'Текст на главной обновлён',
+          ),
+      }),
+      el('button', {
+        type: 'button',
+        className: 'journal-link',
+        text: 'Вернуть «Пар нет»',
+        onClick: () => saveAppSettings({ homeNoLessonsText: '', homeNoLessonsUntil: '' }, 'Снова «Пар нет»'),
+      }),
+    ]),
+    status,
+  ])
+  return box
+}
+
+/** Построения: факультеты, автоотметка, сколько минут до пары. */
+function renderFormationSettings() {
+  const settings = getAppSettings()
+  const facsInput = el('input', {
+    maxlength: '80',
+    placeholder: 'ПД, МЧС',
+    value: (settings.formationFaculties || []).join(', '),
+  })
+  const minsInput = el('input', {
+    type: 'number',
+    min: '0',
+    max: '120',
+    inputmode: 'numeric',
+    value: String(settings.formationAutofillMinutes ?? 15),
+  })
+  const autoBox = el('input', { type: 'checkbox' })
+  autoBox.checked = !!settings.formationAutofill
+  const needsBox = el('input', { type: 'checkbox' })
+  needsBox.checked = settings.formationAutofillNeedsMarks !== false
+
+  return el('div', {}, [
+    el('h3', { style: 'margin:0 0 6px;font-size:15px', text: 'Построение' }),
+    el('p', {
+      className: 'muted',
+      style: 'margin:0 0 10px;font-size:12.5px',
+      text: 'Построение показывается только этим факультетам — по полю в базе или по названию группы.',
+    }),
+    el('div', { className: 'field' }, [el('label', { text: 'Факультеты (через запятую)' }), facsInput]),
+    el('div', { className: 'field' }, [el('label', { text: 'Минут до первой пары' }), minsInput]),
+    el('label', { className: 'admin-check' }, [
+      autoBox,
+      el('span', {
+        text: 'Автоотметка: ставить «н» тем, кого не отметили вовремя',
+      }),
+    ]),
+    el('label', { className: 'admin-check' }, [
+      needsBox,
+      el('span', { text: 'Страховка: только если староста уже начал отмечать' }),
+    ]),
+    el('p', {
+      className: 'muted',
+      style: 'margin:0 0 10px;font-size:12px',
+      text: 'Автоотметка срабатывает на сегодняшнюю дату, когда наступило «минут до пары». Без страховки весь список может стать «н», если расход вообще не открывали.',
+    }),
+    el('button', {
+      type: 'button',
+      className: 'btn secondary',
+      text: 'Сохранить построение',
+      onClick: () =>
+        saveAppSettings(
+          {
+            formationFaculties: facsInput.value
+              .split(',')
+              .map((x) => x.trim().toUpperCase())
+              .filter(Boolean),
+            formationAutofill: autoBox.checked,
+            formationAutofillMinutes: Number(minsInput.value || 15),
+            formationAutofillNeedsMarks: needsBox.checked,
+          },
+          'Настройки построения сохранены',
+        ),
+    }),
+  ])
+}
+
+/** Сессия: подпись и границы — чтобы на главной было видно, что идёт сессия. */
+function renderSessionSettings() {
+  const settings = getAppSettings()
+  const info = getSessionInfo()
+  const label = el('input', { maxlength: '60', placeholder: 'Зимняя сессия', value: settings.sessionLabel || '' })
+  const start = el('input', { type: 'date', value: settings.sessionStart || '' })
+  const end = el('input', { type: 'date', value: settings.sessionEnd || '' })
+
+  return el('div', {}, [
+    el('h3', { style: 'margin:0 0 6px;font-size:15px', text: 'Сессия' }),
+    el('div', { className: 'field' }, [el('label', { text: 'Подпись' }), label]),
+    el('div', { className: 'program-editor-pair' }, [
+      el('div', { className: 'field' }, [el('label', { text: 'Начало' }), start]),
+      el('div', { className: 'field' }, [el('label', { text: 'Конец' }), end]),
+    ]),
+    el('p', {
+      className: 'muted',
+      style: 'margin:0 0 10px;font-size:12.5px',
+      text: info.count
+        ? `Загружено пар: ${info.count}${info.start ? ` · ${formatDateRu(info.start)} — ${formatDateRu(info.end)}` : ''}`
+        : 'Сессионных пар пока нет — загрузи Excel ниже.',
+    }),
+    el('button', {
+      type: 'button',
+      className: 'btn secondary',
+      text: 'Сохранить сессию',
+      onClick: () =>
+        saveAppSettings(
+          { sessionLabel: label.value || '', sessionStart: start.value || '', sessionEnd: end.value || '' },
+          'Сессия сохранена',
+        ),
+    }),
+  ])
+}
+
+/* ── Импорт расписания из Excel ─────────────────────────────────────── */
+
+/** Переживает перерисовку админки: файл уже разобран, повторно читать не нужно. */
+const scheduleImport = {
+  fileName: '',
+  book: null,
+  /** Разбор без сдвига — от него считаем любой режим дат. */
+  baseReport: null,
+  report: null,
+  error: '',
+  busy: false,
+  mode: 'asFile',
+  startIso: '',
+  shiftDays: 0,
+  replace: true,
+  last: null,
+}
+
+function renderScheduleImport() {
+  const box = el('div', {})
+  const settings = getAppSettings()
+
+  if (!scheduleImport.startIso) {
+    scheduleImport.startIso = settings.sessionStart || '2026-12-14'
+  }
+
+  const preview = el('div', { className: 'import-preview' })
+  const status = el('p', { className: 'muted', style: 'margin:8px 0 0;font-size:12.5px' })
+
+  const fileInput = el('input', {
+    type: 'file',
+    accept: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    className: 'import-file',
+  })
+
+  const reparse = () => {
+    if (!scheduleImport.book) return
+    const shift = resolveShift(scheduleImport.baseReport, {
+      mode: scheduleImport.mode,
+      startIso: scheduleImport.startIso,
+      shiftDays: scheduleImport.shiftDays,
+    })
+    scheduleImport.report = parseScheduleBook(scheduleImport.book, {
+      siteGroups: listGroups(),
+      shiftDays: shift,
+    })
+  }
+
+  const paint = () => {
+    preview.replaceChildren()
+    const rep = scheduleImport.report
+    if (scheduleImport.error) {
+      preview.append(el('p', { className: 'journal-error', text: scheduleImport.error }))
+      return
+    }
+    if (!rep) {
+      preview.append(
+        el('p', {
+          className: 'muted',
+          style: 'margin:0',
+          text: 'Выбери файл .xlsx с расписанием. Разбор идёт прямо на телефоне — ничего не уходит на сервер, пока ты не нажмёшь «Импортировать».',
+        }),
+      )
+      return
+    }
+
+    const matched = rep.groups.filter((g) => g.siteId)
+    const days = groupByDate(rep.lessons)
+    preview.append(
+      el('div', { className: 'import-stats' }, [
+        el('span', { text: `Пар: ${rep.lessons.length}` }),
+        el('span', { text: `Групп: ${matched.length}` }),
+        el('span', { text: `Дат: ${rep.dates.length}` }),
+        rep.unknownGroups.length
+          ? el('span', { className: 'is-warn', text: `Без группы: ${rep.unknownGroups.length}` })
+          : null,
+      ]),
+    )
+    if (rep.dates.length) {
+      preview.append(
+        el('p', {
+          className: 'muted',
+          style: 'margin:6px 0',
+          text: `Даты: ${formatDateRu(rep.dates[0])} — ${formatDateRu(rep.dates[rep.dates.length - 1])}${rep.labelGuess ? ` · ${rep.labelGuess}` : ''}`,
+        }),
+      )
+    }
+    for (const w of rep.warnings || []) {
+      preview.append(el('p', { className: 'import-warn', text: w }))
+    }
+    preview.append(
+      el(
+        'div',
+        { className: 'import-days' },
+        days.map((d) =>
+          el('span', { className: 'import-day' }, [
+            el('strong', { text: formatDateRu(d.date) }),
+            el('span', { text: `${d.count} пар · ${d.groups} гр.` }),
+          ]),
+        ),
+      ),
+    )
+  }
+
+  const loadFile = async (file) => {
+    scheduleImport.error = ''
+    scheduleImport.report = null
+    scheduleImport.baseReport = null
+    scheduleImport.book = null
+    scheduleImport.fileName = file?.name || ''
+    if (!file) return paint()
+    try {
+      scheduleImport.busy = true
+      paint()
+      const book = await readXlsx(file)
+      scheduleImport.book = book
+      scheduleImport.baseReport = parseScheduleBook(book, { siteGroups: listGroups(), shiftDays: 0 })
+      scheduleImport.report = scheduleImport.baseReport
+      scheduleImport.last = null
+    } catch (err) {
+      scheduleImport.error = err?.message || 'Не удалось прочитать файл'
+    } finally {
+      scheduleImport.busy = false
+      paint()
+    }
+  }
+
+  fileInput.addEventListener('change', () => {
+    void loadFile(fileInput.files?.[0] || null)
+  })
+
+  // --- Настройки импорта
+  const modeSelect = el('select', {})
+  for (const [value, label] of [
+    ['asFile', 'Даты как в файле'],
+    ['toDate', 'Перенести: первая дата → выбранная'],
+    ['shift', 'Сдвинуть на N дней'],
+  ]) {
+    const opt = el('option', { value, text: label })
+    if (scheduleImport.mode === value) opt.selected = true
+    modeSelect.append(opt)
+  }
+  const startIso = el('input', { type: 'date', value: scheduleImport.startIso })
+  const shiftDays = el('input', {
+    type: 'number',
+    inputmode: 'numeric',
+    value: String(scheduleImport.shiftDays || 0),
+  })
+  const replaceBox = el('input', { type: 'checkbox' })
+  replaceBox.checked = scheduleImport.replace !== false
+
+  const syncModeFields = () => {
+    startIso.disabled = scheduleImport.mode !== 'toDate'
+    shiftDays.disabled = scheduleImport.mode !== 'shift'
+  }
+  modeSelect.addEventListener('change', () => {
+    scheduleImport.mode = modeSelect.value
+    syncModeFields()
+    reparse()
+    paint()
+  })
+  startIso.addEventListener('change', () => {
+    scheduleImport.startIso = startIso.value
+    if (scheduleImport.mode === 'toDate') {
+      reparse()
+      paint()
+    }
+  })
+  shiftDays.addEventListener('change', () => {
+    scheduleImport.shiftDays = Number(shiftDays.value || 0)
+    if (scheduleImport.mode === 'shift') {
+      reparse()
+      paint()
+    }
+  })
+  replaceBox.addEventListener('change', () => {
+    scheduleImport.replace = replaceBox.checked
+  })
+  syncModeFields()
+
+  const importBtn = el('button', {
+    type: 'button',
+    className: 'btn',
+    text: 'Импортировать',
+    onClick: async () => {
+      if (!scheduleImport.report?.lessons?.length) {
+        flash('Сначала выбери файл с парами', true)
+        return
+      }
+      if (importBtn.disabled) return
+      const count = scheduleImport.report.lessons.length
+      if (!confirm(`Импортировать ${count} пар? ${scheduleImport.replace ? 'Старые пары на эти даты у этих групп будут заменены.' : 'Пары добавятся к тем, что уже загружены.'}`)) {
+        return
+      }
+      importBtn.disabled = true
+      const oldText = importBtn.textContent
+      importBtn.textContent = 'Импортирую…'
+      try {
+        // Пересчитываем даты под выбранный режим прямо перед отправкой.
+        reparse()
+        const rows = scheduleImport.report.lessons.map((l) => ({
+          groupId: l.groupId,
+          date: l.date,
+          start: l.start,
+          end: l.end,
+          subject: l.subject,
+          teacher: l.teacher,
+          room: l.room,
+          kind: l.kind,
+          remote: false,
+        }))
+        const res = await importSessionLessons(rows, { replace: scheduleImport.replace })
+        scheduleImport.last = {
+          batch: res?.batch || '',
+          imported: res?.imported ?? rows.length,
+          skipped: res?.skipped ?? 0,
+        }
+        status.textContent = `Добавлено ${scheduleImport.last.imported} пар${scheduleImport.last.skipped ? `, пропущено ${scheduleImport.last.skipped}` : ''}.`
+        flash('Расписание загружено')
+        render({ force: true })
+        if (!refreshTabPanes(['home', 'schedule'])) render({ force: true })
+      } catch (err) {
+        status.textContent = err?.message || 'Импорт не удался'
+        flash(err.message, true)
+      } finally {
+        importBtn.disabled = false
+        importBtn.textContent = oldText
+      }
+    },
+  })
+
+  const rollbackBtn = el('button', {
+    type: 'button',
+    className: 'journal-link',
+    text: scheduleImport.last?.batch ? 'Отменить последний импорт' : 'Отменить последний импорт (нет пачки)',
+    onClick: async () => {
+      const batch = scheduleImport.last?.batch
+      if (!batch) {
+        flash('Сначала импортируй — тогда будет что отменять', true)
+        return
+      }
+      if (!confirm('Удалить пары этого импорта?')) return
+      try {
+        const res = await deleteSessionBatch(batch)
+        flash(`Удалено пар: ${res?.deleted ?? 0}`)
+        scheduleImport.last = null
+        render({ force: true })
+        if (!refreshTabPanes(['home', 'schedule'])) render({ force: true })
+      } catch (err) {
+        flash(err.message, true)
+      }
+    },
+  })
+
+  box.append(
+    el('h3', { style: 'margin:0 0 6px;font-size:15px', text: 'Расписание из Excel' }),
+    el('p', {
+      className: 'muted',
+      style: 'margin:0 0 10px;font-size:12.5px',
+      text: 'Подойдёт файл из деканата: строки «Группа 0903-ПД5», даты и пары по 5 строк. Разбор идёт на телефоне, ключи ИИ не нужны. Группы, которых нет на сайте, пропускаются — они не создаются автоматически.',
+    }),
+    fileInput,
+    el('div', { className: 'field', style: 'margin-top:10px' }, [
+      el('label', { text: 'Даты' }),
+      modeSelect,
+    ]),
+    el('div', { className: 'program-editor-pair' }, [
+      el('div', { className: 'field' }, [el('label', { text: 'Первая дата →' }), startIso]),
+      el('div', { className: 'field' }, [el('label', { text: 'Сдвиг, дней' }), shiftDays]),
+    ]),
+    el('label', { className: 'admin-check' }, [
+      replaceBox,
+      el('span', { text: 'Заменить расписание на эти даты (иначе — добавить)' }),
+    ]),
+    el('div', { style: 'display:flex;gap:10px;flex-wrap:wrap;margin:10px 0' }, [importBtn, rollbackBtn]),
+    preview,
+    status,
+  )
+  paint()
+  return box
+}
+
 
 function renderAdminPanel() {
   const box = el('div', { className: 'card admin-panel' })
@@ -4351,6 +5078,15 @@ function renderAdminPanel() {
         }),
       ]),
       el('div', {
+        style: 'padding:12px;border:1px solid var(--line);border-radius:8px;margin-bottom:12px',
+      }, renderHomeTextSettings()),
+      el('div', {
+        style: 'padding:12px;border:1px solid var(--line);border-radius:8px;margin-bottom:12px',
+      }, renderFormationSettings()),
+      el('div', {
+        style: 'padding:12px;border:1px solid var(--line);border-radius:8px;margin-bottom:12px',
+      }, renderSessionSettings()),
+      el('div', {
         style: 'padding:12px;border:1px solid var(--line);border-radius:8px',
       }, [
         el('h3', { style: 'margin:0 0 6px;font-size:15px', text: 'Очистка старых данных' }),
@@ -4381,6 +5117,13 @@ function renderAdminPanel() {
     box.append(wrapAdminAcc('site', 'Сайт', [siteBody]))
   } else {
     box.append(wrapAdminAcc('site', 'Сайт', null))
+  }
+
+  // —— Расписание из Excel (спойлер)
+  if (isAdminSectionOpen('import')) {
+    box.append(wrapAdminAcc('import', 'Расписание из Excel', [renderScheduleImport()]))
+  } else {
+    box.append(wrapAdminAcc('import', 'Расписание из Excel', null))
   }
 
   // —— Поддержка (спойлер)
@@ -5612,6 +6355,7 @@ function renderMore() {
   if (state.moreScreen === 'contacts') return renderMoreContacts()
   if (state.moreScreen === 'mycode') return renderMoreMyCode()
   if (state.moreScreen === 'support') return renderMoreSupport()
+  if (state.moreScreen === 'students') return renderMoreStudents()
   // Доп. образование и кружки живут только на главной — см. renderHome().
   return MORE_UI_V2 ? renderMoreV2() : renderMoreClassic()
 }
@@ -5627,6 +6371,81 @@ function homeProgramKind() {
 function openProgramScreen(kind) {
   state.moreScreen = kind === 'club' ? 'clubs' : 'dpo'
   gotoTab('home', { animate: true })
+}
+
+/**
+ * «Коды студентов» в профиле.
+ *
+ * Раньше коды можно было выдать только из журнала конкретной пары — чтобы
+ * добавить новому студенту код, нужно было сначала найти пару. Теперь это
+ * отдельный экран: админ выбирает любую группу, староста/куратор — свою.
+ */
+function renderMoreStudents() {
+  const session = getSession()
+  const panel = el('div', { className: 'panel' })
+  if (!session) {
+    panel.append(
+      el('div', { className: 'card' }, [
+        el('p', { className: 'muted', text: 'Сначала войди.' }),
+        el('button', {
+          type: 'button',
+          className: 'btn secondary',
+          text: '← Профиль',
+          onClick: () => {
+            state.moreScreen = ''
+            render({ force: true })
+          },
+        }),
+      ]),
+    )
+    return panel
+  }
+
+  const canWrite = canEdit(state.groupId) || session.role === 'admin' || session.role === 'curator'
+  if (!canWrite) {
+    panel.append(
+      el('div', { className: 'card' }, [
+        el('p', { className: 'muted', text: 'Коды выдаёт староста, куратор или админ.' }),
+        el('button', {
+          type: 'button',
+          className: 'btn secondary',
+          text: '← Профиль',
+          onClick: () => {
+            state.moreScreen = ''
+            render({ force: true })
+          },
+        }),
+      ]),
+    )
+    return panel
+  }
+
+  // Админ и «все группы» — любой список; староста — только своя группа.
+  const allGroups = listGroups()
+  const groups =
+    session.role === 'admin' || session.curatorAll || session.allGroups
+      ? allGroups
+      : allGroups.filter((g) => g.id === session.groupId)
+
+  const defaultGroupId = session.groupId || (groups[0] && groups[0].id) || state.groupId
+
+  panel.append(
+    el('div', { className: 'card' }, [
+      renderStudentsScreen({
+        groupId: defaultGroupId,
+        groups: groups.length ? groups : allGroups,
+        flash: (text, isError) => flash(text, isError),
+        onBack: () => {
+          state.moreScreen = ''
+          render({ force: true })
+        },
+        onPickGroup: (id) => {
+          if (id) state.groupId = id
+        },
+      }),
+    ]),
+  )
+  return panel
 }
 
 /**
@@ -6327,6 +7146,17 @@ function renderMoreV2() {
         render({ force: true })
       },
     }),
+    session && (session.role === 'admin' || session.role === 'curator' || session.allGroups || canEdit(state.groupId))
+      ? moreSettingsRow({
+          icon: 'key',
+          title: 'Коды студентов',
+          sub: 'Выдать код, роли, добавить студента',
+          onClick: () => {
+            state.moreScreen = 'students'
+            render({ force: true })
+          },
+        })
+      : null,
     moreSettingsRow({
       icon: 'help',
       title: 'Техподдержка',
@@ -8115,8 +8945,7 @@ function renderHome() {
 
   // —— Что сейчас и что дальше
   const today = todayISO()
-  const todayDay = weekdayFromISO(today)
-  const todayLessons = todayDay ? getLessons(group.id, todayDay) : []
+  const todayLessons = lessonsForDate(group.id, today)
   const status = getScheduleNowStatus(group.id, today, todayLessons)
   wrap.append(renderHomeNow(status, group))
 
@@ -8274,8 +9103,11 @@ function scrollReaderTo(track, i, animate = true) {
 /**
  * Свайп по ленте карточек: тянется 1:1 за пальцем, соседняя карточка видна
  * сразу. Вертикаль — обычная прокрутка карточки; вниз с самого верха — закрыть.
+ *
+ * Если включён loop, в треке есть клоны по краям (`slot()` возвращает позицию
+ * слота, а не реальный индекс), поэтому «у края» больше нет: лента идёт по кругу.
  */
-function attachCardSwipe({ viewport, track, count, index, goTo, onClose }) {
+function attachCardSwipe({ viewport, track, count, index, slot, goTo, onClose, loop = false }) {
   let sx = null
   let sy = null
   let axis = null
@@ -8285,12 +9117,14 @@ function attachCardSwipe({ viewport, track, count, index, goTo, onClose }) {
   let startAt = 0
   let w = 0
   let pulled = 0
+  let multi = false
 
-  const activeSlide = () => track.children[index()]
+  const slotOf = () => (typeof slot === 'function' ? slot() : index())
+  const activeSlide = () => track.children[slotOf()]
 
   const snap = (animate) => {
     track.style.transition = animate ? `transform ${READER_SNAP_MS}ms ${READER_EASE}` : 'none'
-    track.style.transform = `translate3d(${-index() * 100}%,0,0)`
+    track.style.transform = `translate3d(${-slotOf() * 100}%,0,0)`
   }
 
   const begin = (e) => {
@@ -8346,10 +9180,10 @@ function attachCardSwipe({ viewport, track, count, index, goTo, onClose }) {
     }
     dx = ddx
     moved = Math.max(moved, Math.abs(ddx))
-    const cur = index()
+    const cur = slotOf()
     if (count() < 2) return
-    const atEdge = (ddx > 0 && cur <= 0) || (ddx < 0 && cur >= count() - 1)
-    // У края лента чуть подаётся — видно, что дальше ничего нет.
+    const atEdge = !loop && ((ddx > 0 && index() <= 0) || (ddx < 0 && index() >= count() - 1))
+    // У края (без кольца) лента чуть подаётся — видно, что дальше ничего нет.
     track.style.transition = 'none'
     track.style.transform = `translate3d(calc(${-cur * 100}% + ${atEdge ? ddx * 0.18 : ddx}px),0,0)`
   }
@@ -8381,11 +9215,11 @@ function attachCardSwipe({ viewport, track, count, index, goTo, onClose }) {
     const dir = total < 0 ? 1 : -1
     const far = Math.abs(total) > width * 0.2
     const fast = Math.abs(velocity) > 0.3 && moved > 20
-    const canGo = dir === 1 ? cur < count() - 1 : cur > 0
+    const canGo = loop || (dir === 1 ? cur < count() - 1 : cur > 0)
 
     if (canGo && (far || fast)) {
       busy = true
-      goTo(cur + dir)
+      goTo(cur + dir, dir)
       window.setTimeout(() => {
         busy = false
       }, READER_SNAP_MS + 40)
@@ -8399,11 +9233,26 @@ function attachCardSwipe({ viewport, track, count, index, goTo, onClose }) {
   viewport.addEventListener('pointermove', move)
   viewport.addEventListener('pointerup', end)
   viewport.addEventListener('pointercancel', end)
+  // Второй палец — это уже зум фото, ленту в этот момент не листаем.
+  viewport.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length > 1) multi = true
+    },
+    { passive: true },
+  )
+  viewport.addEventListener(
+    'touchend',
+    (e) => {
+      if (e.touches.length < 2) multi = false
+    },
+    { passive: true },
+  )
   // После свайпа не даём «дожать» тап по фото или кнопке.
   viewport.addEventListener(
     'click',
     (e) => {
-      if (moved > 10) {
+      if (moved > 10 || multi) {
         e.stopPropagation()
         e.preventDefault()
       }
@@ -8424,6 +9273,144 @@ function splitNewsMedia(attachments) {
     else if (/^image\//i.test(mime) || /\.(jpe?g|png|webp|gif|avif)(\?|#|$)/i.test(url)) photos.push(a)
   }
   return { photos, videos }
+}
+
+/**
+ * Зум фото пальцами прямо в просмотре события.
+ *
+ * Раньше приблизить можно было только открыв полноэкранную галерею. Здесь
+ * жест живёт на самой обложке: два пальца — масштаб, один палец при
+ * увеличении — панорама, двойной тап — 2.5×/сброс. Пока масштаб > 1,
+ * лента не листается: жест полностью у фото.
+ *
+ * @returns {{ reset: () => void }}
+ */
+function attachPhotoZoom(host, img) {
+  if (!host || !img) return { reset: () => {} }
+  let scale = 1
+  let tx = 0
+  let ty = 0
+  let startDist = 0
+  let startScale = 1
+  let startX = 0
+  let startY = 0
+  let baseX = 0
+  let baseY = 0
+  let pinching = false
+  let panning = false
+  let lastTap = 0
+
+  const MAX = 4
+  const MIN = 1
+  host.classList.add('is-zoomable')
+
+  const apply = () => {
+    img.style.transform = `translate3d(${tx}px,${ty}px,0) scale(${scale})`
+    host.classList.toggle('is-zoomed', scale > 1.01)
+  }
+
+  /** Не даём утащить фото за пределы контейнера. */
+  const clamp = () => {
+    const hw = host.clientWidth
+    const hh = host.clientHeight
+    const maxX = Math.max(0, (hw * (scale - 1)) / 2)
+    const maxY = Math.max(0, (hh * (scale - 1)) / 2)
+    tx = Math.min(maxX, Math.max(-maxX, tx))
+    ty = Math.min(maxY, Math.max(-maxY, ty))
+  }
+
+  const reset = () => {
+    scale = 1
+    tx = 0
+    ty = 0
+    img.style.transition = 'transform 180ms ease'
+    apply()
+    window.setTimeout(() => {
+      img.style.transition = ''
+    }, 200)
+  }
+
+  const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
+
+  const onTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      pinching = true
+      panning = false
+      startDist = distance(e.touches[0], e.touches[1]) || 1
+      startScale = scale
+      img.style.transition = ''
+      // Лента не должна листаться параллельно с зумом.
+      e.stopPropagation()
+      return
+    }
+    if (e.touches.length === 1 && scale > 1.01) {
+      panning = true
+      startX = e.touches[0].clientX
+      startY = e.touches[0].clientY
+      baseX = tx
+      baseY = ty
+      img.style.transition = ''
+    }
+  }
+
+  const onTouchMove = (e) => {
+    if (pinching && e.touches.length === 2) {
+      const d = distance(e.touches[0], e.touches[1]) || 1
+      scale = Math.min(MAX, Math.max(MIN, (d / startDist) * startScale))
+      clamp()
+      apply()
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    if (panning && e.touches.length === 1 && scale > 1.01) {
+      tx = baseX + (e.touches[0].clientX - startX)
+      ty = baseY + (e.touches[0].clientY - startY)
+      clamp()
+      apply()
+      e.preventDefault()
+      e.stopPropagation()
+    }
+  }
+
+  const onTouchEnd = (e) => {
+    if (e.touches.length === 0) {
+      pinching = false
+      panning = false
+      if (scale < 1.02) reset()
+    }
+  }
+
+  // Двойной тап: приблизить к точке / вернуть как было.
+  const onDoubleTap = (e) => {
+    const now = Date.now()
+    if (now - lastTap < 300) {
+      if (scale > 1.01) {
+        reset()
+      } else {
+        scale = 2.5
+        clamp()
+        img.style.transition = 'transform 180ms ease'
+        apply()
+        window.setTimeout(() => {
+          img.style.transition = ''
+        }, 200)
+      }
+      lastTap = 0
+      e.preventDefault()
+      return
+    }
+    lastTap = now
+  }
+
+  host.addEventListener('touchstart', onTouchStart, { passive: false })
+  host.addEventListener('touchmove', onTouchMove, { passive: false })
+  host.addEventListener('touchend', onTouchEnd, { passive: true })
+  host.addEventListener('touchcancel', onTouchEnd, { passive: true })
+  host.addEventListener('click', onDoubleTap)
+
+  apply()
+  return { reset, isZoomed: () => scale > 1.01 }
 }
 
 /**
@@ -8467,10 +9454,19 @@ function openNewsReader(items, startIndex = 0) {
   }
 
   /** Одна карточка события: обложка, текст, инструменты, точки. */
-  const buildCard = (item, i) => {
+  const buildCard = (item, i, cloneOf = null) => {
     const { photos, videos } = splitNewsMedia(item.attachments)
     const canEditNews = canWriteNews(state.groupId)
     const cover = photos[0]
+
+    const coverNode = cover
+      ? el('img', {
+          className: 'news-reader-cover',
+          src: cover.url,
+          alt: item.title || '',
+          decoding: 'async',
+        })
+      : el('div', { className: 'news-reader-cover news-reader-cover-blank', 'aria-hidden': 'true' })
 
     const hero = el('div', { className: 'news-reader-hero' }, [
       cover
@@ -8480,14 +9476,7 @@ function openNewsReader(items, startIndex = 0) {
             style: `background-image:url("${cover.url}")`,
           })
         : null,
-      cover
-        ? el('img', {
-            className: 'news-reader-cover',
-            src: cover.url,
-            alt: item.title || '',
-            decoding: 'async',
-          })
-        : el('div', { className: 'news-reader-cover news-reader-cover-blank', 'aria-hidden': 'true' }),
+      coverNode,
       el('div', { className: 'news-reader-scrim', 'aria-hidden': 'true' }),
       photos.length > 1
         ? el('button', {
@@ -8510,6 +9499,9 @@ function openNewsReader(items, startIndex = 0) {
         ]),
       ]),
     ])
+
+    // Приблизить фото можно прямо здесь, не открывая галерею.
+    if (cover) attachPhotoZoom(hero, coverNode)
 
     const extra = photos.slice(1)
 
@@ -8558,46 +9550,47 @@ function openNewsReader(items, startIndex = 0) {
         : null,
     ])
 
-    const toolbar = canEditNews
-      ? el('div', { className: 'news-reader-toolbar' }, [
-          el('button', {
-            type: 'button',
-            className: 'news-reader-tool is-up',
-            text: 'Выше',
-            title: 'Показывать раньше',
-            onClick: () => move(i, -1),
-          }),
-          el('button', {
-            type: 'button',
-            className: 'news-reader-tool is-down',
-            text: 'Ниже',
-            title: 'Показывать позже',
-            onClick: () => move(i, 1),
-          }),
-          el('button', {
-            type: 'button',
-            className: 'news-reader-tool',
-            text: 'Изменить',
-            onClick: () => edit(i),
-          }),
-          el('button', {
-            type: 'button',
-            className: 'news-reader-tool is-del',
-            text: 'Удалить',
-            onClick: () => removeItem(i),
-          }),
-        ])
-      : null
+    // В клоне инструменты не нужны: правка/удаление привязаны к реальной карточке.
+    const toolbar =
+      canEditNews && cloneOf === null
+        ? el('div', { className: 'news-reader-toolbar' }, [
+            el('button', {
+              type: 'button',
+              className: 'news-reader-tool is-up',
+              text: 'Выше',
+              title: 'Показывать раньше',
+              onClick: () => move(i, -1),
+            }),
+            el('button', {
+              type: 'button',
+              className: 'news-reader-tool is-down',
+              text: 'Ниже',
+              title: 'Показывать позже',
+              onClick: () => move(i, 1),
+            }),
+            el('button', {
+              type: 'button',
+              className: 'news-reader-tool',
+              text: 'Изменить',
+              onClick: () => edit(i),
+            }),
+            el('button', {
+              type: 'button',
+              className: 'news-reader-tool is-del',
+              text: 'Удалить',
+              onClick: () => removeItem(i),
+            }),
+          ])
+        : null
 
     const pager =
-      list.length > 1
+      list.length > 1 && cloneOf === null
         ? el('nav', { className: 'news-reader-pager' }, [
             el('button', {
               type: 'button',
               className: 'news-reader-pager-btn',
               text: '‹',
               'aria-label': 'Предыдущее событие',
-              disabled: i === 0,
               onClick: () => step(-1),
             }),
             el(
@@ -8617,38 +9610,99 @@ function openNewsReader(items, startIndex = 0) {
               className: 'news-reader-pager-btn',
               text: '›',
               'aria-label': 'Следующее событие',
-              disabled: i >= list.length - 1,
               onClick: () => step(1),
             }),
           ])
         : null
 
-    return el('article', { className: 'news-reader-card' }, [hero, content, toolbar, pager])
+    return el(
+      'article',
+      {
+        className: `news-reader-card${cloneOf === null ? '' : ' is-clone'}`,
+        dataset: cloneOf === null ? { readerIndex: String(i) } : { readerClone: String(cloneOf) },
+        'aria-hidden': cloneOf === null ? undefined : 'true',
+      },
+      [hero, content, toolbar, pager],
+    )
   }
+
+  /**
+   * Лента листается по кругу. В треке держим [клон последней, …карточки, клон первой],
+   * поэтому у края всегда есть сосед. Когда анимация доезжает до клона, мгновенно
+   * (без анимации) встаём на настоящую карточку того же события — шва не видно.
+   * Позиция в треке = реальный индекс + 1.
+   */
+  const loopOffset = () => (list.length > 1 ? 1 : 0)
+  let slotPos = index + loopOffset()
+
+  const mountCards = (activeIndex) => {
+    const cards = []
+    if (list.length > 1) cards.push(buildCard(list[list.length - 1], list.length - 1, 'last'))
+    list.forEach((n, i) => cards.push(buildCard(n, i)))
+    if (list.length > 1) cards.push(buildCard(list[0], 0, 'first'))
+    slotPos = activeIndex + loopOffset()
+    mountReaderCards(track, cards, slotPos)
+  }
+
+  const realCards = () =>
+    [...track.children].filter(
+      (node) => node instanceof Element && node.dataset.readerIndex !== undefined,
+    )
 
   /** Перерисовать ленту целиком — нужно после правки, удаления и смены порядка. */
   const repaint = () => {
-    const cards = list.map((n, i) => buildCard(n, i))
-    mountReaderCards(track, cards, index)
+    mountCards(index)
     paintDots()
   }
 
   const paintDots = () => {
-    const dots = track.children[index]?.querySelectorAll('.news-reader-pager-dot')
+    const card = realCards().find((n) => Number(n.dataset.readerIndex) === index)
+    const dots = card?.querySelectorAll('.news-reader-pager-dot')
     if (dots?.length) [...dots].forEach((d, k) => d.classList.toggle('is-on', k === index))
   }
 
-  const goTo = (i) => {
-    const next = Math.max(0, Math.min(list.length - 1, i))
+  const moveToSlot = (target, animate = true) => {
+    slotPos = target
+    scrollReaderTo(track, target, animate)
+  }
+
+  /** После анимации: если остановились на клоне — мгновенно встаём на настоящую. */
+  const settleAfterSlide = () => {
+    if (list.length < 2) return
+    const want = index + loopOffset()
+    if (slotPos !== want) moveToSlot(want, false)
+  }
+
+  /**
+   * Перейти к событию `i`.
+   * dir = +1/−1 — листать ровно на один слот (так край проходит без рывка),
+   * без dir — сразу встать на нужную карточку.
+   */
+  const goTo = (i, dir = 0) => {
+    const n = list.length
+    if (!n) return
+    const next = ((i % n) + n) % n
     if (next === index) return
     index = next
     state.newsIndex = next
-    scrollReaderTo(track, next)
+    if (!loopOffset()) {
+      moveToSlot(next)
+    } else if (dir) {
+      moveToSlot(Math.max(0, slotPos + dir))
+    } else {
+      moveToSlot(next + loopOffset())
+    }
     paintDots()
     hapticTap()
+    window.setTimeout(settleAfterSlide, READER_SNAP_MS + 40)
   }
 
-  const step = (delta) => goTo(index + delta)
+  const step = (delta) => {
+    if (list.length < 2) return
+    const next = (((index + delta) % list.length) + list.length) % list.length
+    goTo(next, delta > 0 ? 1 : -1)
+  }
+
 
   const edit = (i) => {
     const item = list[i]
@@ -8734,9 +9788,12 @@ function openNewsReader(items, startIndex = 0) {
     track,
     count: () => list.length,
     index: () => index,
+    slot: () => slotPos,
+    loop: list.length > 1,
     goTo,
     onClose: close,
   })
+
 
   const onKey = (e) => {
     if (e.key === 'Escape') close()
@@ -8748,7 +9805,7 @@ function openNewsReader(items, startIndex = 0) {
 
   // Поворот телефона или изменение ширины — лента должна остаться на своём слайде.
   const onResize = () => {
-    if (document.body.contains(overlay)) scrollReaderTo(track, index, false)
+    if (document.body.contains(overlay)) scrollReaderTo(track, slotPos, false)
   }
   window.addEventListener('resize', onResize, { passive: true })
   overlay.addEventListener('remove', () => window.removeEventListener('resize', onResize))
@@ -8820,12 +9877,6 @@ function renderHomeHero(group) {
       {
         className: 'home-hero-slide',
         dataset: { slide: String(i) },
-        onClick: () => {
-          // Свайп не должен открывать событие: тащим — молчим, тапнули — открываем.
-          if (Number(track.dataset.moved || 0) > 8) return
-          hapticTap()
-          openNewsReader(items, i)
-        },
       },
       [
         photo
@@ -8851,12 +9902,46 @@ function renderHomeHero(group) {
     )
   })
 
-  const track = el('div', { className: 'home-hero-track' }, slides)
+  /**
+   * Карусель идёт по кругу: [клон последнего, …слайды, клон первого].
+   * Позиция в треке = индекс события + 1. После анимации на клоне
+   * мгновенно встаём на настоящий слайд — шва не видно.
+   */
+  const loop = items.length > 1
+  const loopOffset = () => (loop ? 1 : 0)
+  const makeTrackNodes = () => {
+    if (!loop) return [...slides]
+    return [slides[slides.length - 1].cloneNode(true), ...slides, slides[0].cloneNode(true)]
+  }
+  const track = el('div', { className: 'home-hero-track' }, makeTrackNodes())
+  let slotPos = index + loopOffset()
   const setX = (i, animate = true) => {
+    slotPos = i
     track.style.transition = animate ? 'transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1)' : 'none'
     track.style.transform = `translate3d(${-i * 100}%,0,0)`
   }
-  setX(index, false)
+  setX(index + loopOffset(), false)
+
+  // Клик по слайду: cloneNode не копирует обработчики, поэтому слушаем трек.
+  track.addEventListener('click', (e) => {
+    if (Number(track.dataset.moved || 0) > 8) return
+    const card = e.target instanceof Element ? e.target.closest('.home-hero-slide') : null
+    if (!card) return
+    const all = [...track.children]
+    const slot = all.indexOf(card)
+    if (slot < 0) return
+    const n = items.length
+    const real = ((slot - loopOffset()) % n + n) % n
+    hapticTap()
+    openNewsReader(items, real)
+  })
+
+  /** После анимации, если стоим на клоне — мгновенно встаём на настоящий слайд. */
+  const settle = () => {
+    if (!loop) return
+    const want = (Number(state.newsIndex) || 0) + 1
+    if (slotPos !== want) setX(want, false)
+  }
 
   const dots = el(
     'div',
@@ -8870,8 +9955,9 @@ function renderHomeHero(group) {
         onClick: () => {
           hapticTap()
           state.newsIndex = i
-          setX(i)
+          setX(i + loopOffset())
           paintDots(i)
+          window.setTimeout(settle, 340)
         },
       }),
     ),
@@ -8904,24 +9990,30 @@ function renderHomeHero(group) {
       // Вертикальный жест — это скролл страницы, карусель не трогаем.
       if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 10) {
         x0 = null
-        setX(state.newsIndex || 0, false)
+        setX(slotPos, false)
         return
       }
       drag = dx
       track.dataset.moved = String(Math.abs(dx))
-      track.style.transform = `translate3d(calc(${-(state.newsIndex || 0) * 100}% + ${dx}px),0,0)`
+      track.style.transform = `translate3d(calc(${-slotPos * 100}% + ${dx}px),0,0)`
     }
     const end = () => {
       if (x0 == null) return
       x0 = null
-      let next = state.newsIndex || 0
-      if (drag < -55 && next < items.length - 1) next += 1
-      else if (drag > 55 && next > 0) next -= 1
+      let dir = 0
+      if (drag < -55) dir = 1
+      else if (drag > 55) dir = -1
       drag = 0
-      if (next !== state.newsIndex) hapticTap()
-      state.newsIndex = next
-      setX(next)
-      paintDots(next)
+      if (dir) {
+        hapticTap()
+        const n = items.length
+        state.newsIndex = (((state.newsIndex || 0) + dir) % n + n) % n
+        setX(slotPos + dir)
+        paintDots(state.newsIndex)
+        window.setTimeout(settle, 340)
+      } else {
+        setX(slotPos)
+      }
       window.setTimeout(() => {
         track.dataset.moved = '0'
       }, 60)
@@ -8964,9 +10056,12 @@ function renderHomeHero(group) {
       count: items.length,
       getIndex: () => Number(state.newsIndex) || 0,
       setIndex: (i) => {
-        state.newsIndex = i
-        setX(i)
-        paintDots(i)
+        const n = items.length
+        const next = ((i % n) + n) % n
+        state.newsIndex = next
+        setX(next + loopOffset())
+        paintDots(next)
+        window.setTimeout(settle, 340)
       },
     })
   }
@@ -9442,12 +10537,28 @@ function syncComposeToggle() {
   btn.setAttribute('aria-expanded', open ? 'true' : 'false')
 }
 
+/** Ещё показывать админский текст вместо «Пар нет»? (пустой until = бессрочно) */
+function homeNoLessonsText() {
+  const settings = getAppSettings()
+  const text = String(settings.homeNoLessonsText || '').trim()
+  if (!text) return ''
+  const until = String(settings.homeNoLessonsUntil || '').trim()
+  if (!until) return text
+  const t = Date.parse(until)
+  if (!Number.isFinite(t)) return text
+  return Date.now() < t ? text : ''
+}
+
 /** Карточка «идёт сейчас / следующая пара / на сегодня всё». */
 function renderHomeNow(status, group) {
   if (!status) {
+    const custom = homeNoLessonsText()
     return el('div', { className: 'card home-now' }, [
       el('p', { className: 'home-now-label muted', text: 'Сегодня' }),
-      el('h3', { className: 'home-now-title', text: 'Пар нет' }),
+      el('h3', {
+        className: `home-now-title${custom ? ' is-custom' : ''}`,
+        text: custom || 'Пар нет',
+      }),
     ])
   }
   if (status.kind === 'done') {
@@ -9743,6 +10854,8 @@ function journalCtx() {
     render,
     getGroup,
     getLessons,
+    /** Пары группы на дату: в сессию это экзамены, иначе недельный шаблон. */
+    lessonsOn: (groupId, dateStr) => lessonsForDate(groupId, dateStr),
     formatDateRu,
     dateForWeekday,
     weekdayFromISO,
@@ -10771,7 +11884,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=149`, { scope: base })
+    .register(`${base}sw.js?v=150`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
