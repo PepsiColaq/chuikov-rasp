@@ -5930,16 +5930,6 @@ const AUDIT_TITLES = {
   site_toggle: 'Переключение сайта',
 }
 
-/** Человеческие названия явки. */
-const ATT_LABEL = {
-  present: 'был',
-  absent: 'не был',
-  sick: 'болеет',
-  duty: 'на мероприятии',
-  event: 'мероприятие',
-  excused: 'уважительная',
-}
-
 function auditTitle(action) {
   return AUDIT_TITLES[action] || action || 'Действие'
 }
@@ -5967,168 +5957,334 @@ function auditWhen(iso) {
   return `${formatDateRu(d.toISOString().slice(0, 10))}, ${time}`
 }
 
+/* ── Разбор событий журнала ─────────────────────────────────────────
+   Задача: админ не должен видеть технические идентификаторы. Вместо
+   «hw_5ed4588c1cb2fc31» — что это за задание, вместо «jg_7247…» — кому
+   и какая оценка. Всё, что не удалось разобрать по известному формату,
+   показывается человеческой фразой, а не сырой строкой из базы. */
+
+/** Явка в журнале пары. */
+const ATT_LABEL = {
+  present: 'был',
+  absent: 'не был',
+  sick: 'болеет',
+  duty: 'на мероприятии',
+  event: 'мероприятие',
+  excused: 'уважительная',
+  '-': 'без отметки',
+  '': 'без отметки',
+}
+
+/** Роли в человеческом виде. */
+const ROLE_RU = {
+  student: 'студент',
+  starosta: 'староста',
+  teacher: 'преподаватель',
+  admin: 'админ',
+  curator: 'куратор',
+  deputy: 'зам. старосты',
+  all: 'все группы',
+}
+
+function roleRu(role) {
+  return ROLE_RU[String(role || '').toLowerCase()] || String(role || '')
+}
+
+/** Дата «2026-11-09» → «09.11.2026» с защитой от мусора. */
+function auditDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''))
+  if (!m) return String(iso || '')
+  return m[3] + '.' + m[2] + '.' + m[1]
+}
+
+/** Убираем из строки внутренние id, если они всё же просочились. */
+function stripIds(text) {
+  return String(text || '')
+    .replace(/\b(hw|news|jg|jm|fm|ovr|adm|gc|st)_[A-Za-z0-9А-Яа-я_]{4,}\b/g, '')
+    .replace(/\bsessions_purged\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s·,\-–—]+|[\s·,\-–—]+$/g, '')
+    .trim()
+}
+
+/** Найти снимок нужной таблицы в записи журнала. */
+function auditSnapshot(row, tables) {
+  const list = Array.isArray(row.undo) ? row.undo : []
+  const names = Array.isArray(tables) ? tables : [tables]
+  for (const item of list) {
+    if (!item || !names.includes(item.tbl)) continue
+    const rec = item.new || item.old
+    if (rec && typeof rec === 'object') return { rec, item }
+  }
+  return null
+}
+
 /**
- * Разбор технических деталей в понятные части.
- * Форматы приходят из SQL-функций и различаются по действию.
+ * Главный разбор. Возвращает части карточки:
+ *   who — кого касается, when — дата пары, from/to — было/стало,
+ *   note — пояснение.
  */
 function parseAuditDetail(row) {
   const detail = String(row.detail || '').trim()
   const out = { who: '', when: '', from: '', to: '', note: '', raw: detail }
   if (!detail) return out
 
+  // ── Отметка в журнале пары ──────────────────────────────────────────
+  // «Тарасов 2026-11-09 10:20 н/2→+/3 Разговаривала на паре»
+  // «Тарасов 2026-11-09 10:20 снята отметка»
   if (row.action === 'journal_mark') {
-    // «Тарасов 2026-11-09 10:20 н/2→+/3 Разговаривала на паре»
-    // или «Тарасов 2026-11-09 10:20 снята отметка»
     const m = /^(.+?)\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s*(.*)$/.exec(detail)
     if (m) {
-      out.who = m[1].trim()
-      out.when = `${formatDateRu(m[2])}, ${m[3]}`
+      out.who = stripIds(m[1])
+      out.when = auditDate(m[2]) + ', ' + m[3]
       const rest = m[4]
-      const arrow = rest.indexOf('→')
-      if (arrow >= 0) {
-        const before = rest.slice(0, arrow).trim()
-        const after = rest.slice(arrow + 1).trim()
-        const split = (s) => {
-          // Формат «явка/оценка текст»: н/2→+/3 «Разговаривала». Оценка —
-          // ведущее число после слэша, остальное — комментарий.
-          const [att, ...tail] = s.split('/')
-          const rest = tail.join('/').trim()
-          const gm = /^(\d)\s*(.*)$/.exec(rest)
-          const grade = gm ? gm[1] : ''
-          const note = gm ? gm[2].trim() : rest
-          return { att: att || '-', grade, note }
+
+      const split = (chunk) => {
+        // «явка/оценка текст»: н/2 → был/2. Оценка — ведущее число.
+        const parts = String(chunk).split('/')
+        const att = parts[0] || ''
+        const tailText = parts.slice(1).join('/').trim()
+        const gm = /^(\d)\s*(.*)$/.exec(tailText)
+        return {
+          att: att.trim(),
+          grade: gm ? gm[1] : '',
+          note: gm ? gm[2].trim() : tailText,
         }
-        const b = split(before)
-        const a = split(after)
-        out.from = ATT_LABEL[b.att] || b.att
-        out.to = ATT_LABEL[a.att] || a.att
-        // Показываем оценку рядом с явкой, если она есть: «+ · 3».
-        if (a.grade) out.to = `${out.to} · ${a.grade}`
-        else if (b.grade) out.from = `${out.from} · ${b.grade}`
-        out.note = a.note || b.note || ''
+      }
+      const label = (part) => {
+        const att = ATT_LABEL[part.att] !== undefined ? ATT_LABEL[part.att] : part.att
+        return part.grade ? att + ' · ' + part.grade : att
+      }
+
+      if (rest.indexOf('→') >= 0) {
+        const halves = rest.split('→')
+        const b = split(halves[0])
+        const a = split(halves[1])
+        out.from = label(b)
+        out.to = label(a)
+        out.note = stripIds(a.note || b.note || '')
       } else if (/снята отметка/.test(rest)) {
         out.from = 'отметка была'
         out.to = 'отметки нет'
-      } else {
-        out.note = rest
+      } else if (rest) {
+        out.note = stripIds(rest)
       }
       return out
     }
   }
 
+  // ── Оценка поставлена ───────────────────────────────────────────────
+  // «2026-11-09 10:20 +4»; кто — из снимка.
   if (row.action === 'journal_grade') {
-    // «2026-11-09 10:20 +4»
+    const snap = auditSnapshot(row, 'journal_grades')
+    const rec = snap ? snap.rec : null
     const m = /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s*\+?(\d?)(.*)$/.exec(detail)
     if (m) {
-      out.when = `${formatDateRu(m[1])}, ${m[2]}`
-      out.to = m[3] ? `оценка ${m[3]}` : ''
-      out.note = m[4].trim()
+      out.when = auditDate(m[1]) + ', ' + m[2]
+      const value = (rec && rec.value) || m[3]
+      out.to = value ? 'оценка ' + value : 'оценка'
+      if (rec && rec.subject) out.note = String(rec.subject)
+      else if (stripIds(m[4])) out.note = stripIds(m[4])
       return out
     }
   }
 
+  // ── Оценка удалена ──────────────────────────────────────────────────
+  // «jg_72475fab26757fb7a0ae 2» — id и значение, id не показываем.
   if (row.action === 'journal_grade_delete') {
-    // «jg_… 4» — id оценки и значение
-    const m = /^\S+\s+(\d)$/.exec(detail)
-    if (m) out.from = `оценка ${m[1]}`
+    const snap = auditSnapshot(row, 'journal_grades')
+    const rec = snap ? snap.rec : null
+    const m = /\s(\d)$/.exec(detail)
+    const value = (rec && rec.value) || (m ? m[1] : '')
+    out.to = value ? 'оценки ' + value + ' больше нет' : 'оценка удалена'
+    const bits = []
+    if (rec && rec.subject) bits.push(String(rec.subject))
+    if (rec && rec.on_date) bits.push(auditDate(rec.on_date) + (rec.slot_start ? ', ' + rec.slot_start : ''))
+    if (bits.length) out.note = bits.join(' · ')
     return out
   }
 
+  // ── Смена роли ──────────────────────────────────────────────────────
+  // «Михайлова → starosta»
   if (row.action === 'student_role') {
-    // «Михайлова → starosta»
     const m = /^(.+?)\s*→\s*(\w+)$/.exec(detail)
     if (m) {
-      out.who = m[1].trim()
-      out.to = roleRu(m[2])
+      out.who = stripIds(m[1])
+      out.to = 'теперь ' + roleRu(m[2])
       return out
     }
   }
 
+  // ── Отметка на построении ───────────────────────────────────────────
   if (row.action === 'formation_mark') {
     const m = /^(.+?)\s+(\d{4}-\d{2}-\d{2})\s*(.*)$/.exec(detail)
     if (m) {
-      out.who = m[1].trim()
-      out.when = formatDateRu(m[2])
-      out.note = m[3]
+      out.who = stripIds(m[1])
+      out.when = auditDate(m[2])
+      const rest = stripIds(m[3])
+      if (rest.indexOf('→') >= 0) {
+        const halves = rest.split('→')
+        const b = halves[0].trim()
+        const a = halves[1].trim()
+        out.from = ATT_LABEL[b] !== undefined ? ATT_LABEL[b] : b || 'без отметки'
+        out.to = ATT_LABEL[a] !== undefined ? ATT_LABEL[a] : a
+      } else if (rest) {
+        out.to = ATT_LABEL[rest] !== undefined ? ATT_LABEL[rest] : rest
+      }
       return out
     }
   }
 
-  if (row.action === 'program_save') {
-    const snapshot = (Array.isArray(row.undo) ? row.undo : []).find(
-      (u) => u && u.tbl === 'programs' && (u.new || u.old),
-    )
-    const record = snapshot?.new || snapshot?.old || null
-    out.to = record && record.title ? String(record.title) : detail
-    return out
-  }
-
+  // ── Домашнее задание ────────────────────────────────────────────────
+  // detail: «Никита · Тактико-специальная подготовка · hw_5ed4…»
+  // Главное — не показать hw_…, а сказать, что за задание и что в нём.
   if (row.action === 'homework_add' || row.action === 'homework_delete') {
-    // detail: «Никита · Тактико-специальная подготовка · hw_…».
-    // Первая часть — автор, её уже показывает подпись карточки.
-    // Предмет и текст берём из снимка: там настоящие значения.
+    const snap = auditSnapshot(row, 'homework')
+    const rec = snap ? snap.rec : null
     const parts = detail.split(' · ')
-    const subject = parts.length >= 2 ? parts[1] : ''
-    const snapshot = (Array.isArray(row.undo) ? row.undo : []).find(
-      (u) => u && (u.tbl === 'homework' || u.tbl === 'news') && (u.new || u.old),
-    )
-    const record = snapshot?.new || snapshot?.old || null
-    const body = record && typeof record === 'object' ? String(record.body || '').trim() : ''
-    out.to = subject || (record && record.subject ? String(record.subject) : '')
-    if (body) out.note = body.length > 240 ? body.slice(0, 240) + '…' : body
+    const subject = (rec && rec.subject) || (parts.length >= 2 ? parts[1] : '')
+    out.to = subject ? '«' + subject + '»' : 'домашнее задание'
+    const bits = []
+    if (rec && rec.body) {
+      const body = String(rec.body).trim()
+      if (body) bits.push(body.length > 200 ? body.slice(0, 200) + '…' : body)
+    }
+    if (rec && rec.due_date) bits.push('сдать до ' + auditDate(rec.due_date))
+    if (bits.length) out.note = bits.join(' · ')
     return out
   }
 
+  // ── Новость ─────────────────────────────────────────────────────────
   if (row.action === 'news_add') {
-    const snapshot = (Array.isArray(row.undo) ? row.undo : []).find(
-      (u) => u && u.tbl === 'news' && (u.new || u.old),
-    )
-    const record = snapshot?.new || snapshot?.old || null
-    out.to = record && record.title ? String(record.title) : detail
-    const body = record && typeof record === 'object' ? String(record.body || '').trim() : ''
-    if (body) out.note = body.length > 240 ? body.slice(0, 240) + '…' : body
+    const snap = auditSnapshot(row, 'news')
+    const rec = snap ? snap.rec : null
+    const title = (rec && rec.title) || stripIds(detail)
+    out.to = title ? '«' + title + '»' : 'новость'
+    if (rec && rec.pinned) out.note = 'закреплена наверху'
     return out
   }
 
+  // ── Программа (допобразование, кружок) ──────────────────────────────
+  if (row.action === 'program_save') {
+    const snap = auditSnapshot(row, 'programs')
+    const rec = snap ? snap.rec : null
+    const title = rec && rec.title ? String(rec.title) : ''
+    const kind = rec && rec.kind === 'club' ? 'кружок' : 'допобразование'
+    const legacy = /^(dpo|club):(.+)$/.exec(detail)
+    if (title) {
+      out.to = '«' + title + '»'
+      out.note = kind
+    } else if (legacy) {
+      out.to = '«' + legacy[2] + '»'
+      out.note = legacy[1] === 'club' ? 'кружок' : 'допобразование'
+    } else {
+      out.to = stripIds(detail) || 'программа'
+    }
+    return out
+  }
+
+  // ── Замены пар ──────────────────────────────────────────────────────
   if (row.action === 'override_set' || row.action === 'override_clear') {
+    const TYPE_RU = {
+      room_only: 'другой кабинет',
+      subject: 'другая пара',
+      subject_and_room: 'другая пара и кабинет',
+      cancelled: 'пара отменена',
+    }
+    const snap = auditSnapshot(row, 'overrides')
+    const rec = snap ? snap.rec : null
+    if (row.action === 'override_clear') {
+      out.from = 'замена была'
+      out.to = 'замены нет'
+      return out
+    }
+    if (rec) {
+      out.to = TYPE_RU[rec.type] || 'замена'
+      if (rec.on_date) out.when = auditDate(rec.on_date)
+      const bits = []
+      if (rec.new_subject) bits.push('предмет: ' + rec.new_subject)
+      if (rec.new_room) bits.push('кабинет: ' + rec.new_room)
+      if (rec.note) bits.push(rec.note)
+      if (bits.length) out.note = bits.join(' · ')
+      return out
+    }
     const parts = detail.split(' · ')
-    out.who = parts[0] || ''
-    out.to = parts.slice(1).join(' · ')
+    out.to = TYPE_RU[parts[1]] || 'замена'
+    if (parts[2]) out.when = auditDate(parts[2])
     return out
   }
 
-  // Входы: «ok», «bad code-prefix=…», «blocked ip=…»
-  if (row.action.startsWith('login_')) {
-    if (detail === 'ok') out.to = 'успешно'
-    else if (/bad code-prefix=(\w+)/.test(detail)) {
+  // ── Входы ───────────────────────────────────────────────────────────
+  if (row.action.indexOf('login_') === 0) {
+    if (detail === 'ok' || detail === 'успешно') out.to = 'вход выполнен'
+    else if (/bad code-prefix/.test(detail)) {
       out.to = 'неверный код'
-      out.note = `фрагмент ${RegExp.$1}`
+      out.note = 'ввод отклонён, попытка записана'
     } else if (/blocked/.test(detail)) {
-      out.to = 'заблокировано'
-      out.note = detail.replace(/^blocked\s*/, '')
-    } else out.to = detail
+      out.to = 'вход заблокирован'
+      out.note = 'слишком много попыток'
+    } else if (/after fails/.test(detail)) {
+      out.to = 'вход заблокирован после неудачных попыток'
+    } else {
+      out.to = stripIds(detail) || 'вход'
+    }
     return out
   }
 
+  // ── Откат действия ──────────────────────────────────────────────────
   if (row.action === 'audit_undo') {
-    out.to = detail.replace(/^отменено действие «(\w+)»/, (_, a) => `отменено «${auditTitle(a)}»`)
+    const m = /отменено действие «(\w+)»/.exec(detail)
+    out.to = m ? 'отменено: ' + auditTitle(m[1]).toLowerCase() : 'действие отменено'
+    const rows = /строк:\s*(\d+)/.exec(detail)
+    if (rows) out.note = 'затронуто записей: ' + rows[1]
     return out
   }
 
-  out.to = detail
-  return out
-}
-
-function roleRu(role) {
-  const map = {
-    student: 'студент',
-    starosta: 'староста',
-    teacher: 'преподаватель',
-    admin: 'админ',
-    curator: 'куратор',
-    deputy: 'зам. старосты',
+  // ── Коды и админы ───────────────────────────────────────────────────
+  if (/code|admin|curator|staff/i.test(row.action)) {
+    const ACTION_RU = {
+      starosta_code_add: 'выдан новый код',
+      starosta_code_revoke: 'код отозван',
+      starosta_label_rename: 'переименован код',
+      starosta_role_title: 'изменена подпись роли',
+      admin_display_name: 'изменено имя админа',
+      admin_add: 'добавлен админ',
+      admin_revoke: 'админ отозван',
+      curator_add: 'добавлен куратор',
+      curator_revoke: 'куратор отозван',
+      staff_add: 'выдан доступ',
+      staff_remove: 'доступ снят',
+    }
+    out.to = ACTION_RU[row.action] || 'изменение доступа'
+    const clean = stripIds(detail.replace(/^(all|sessions_purged)\s*·?\s*/i, ''))
+    if (clean) out.note = clean
+    return out
   }
-  return map[role] || role
+
+  // ── Настройки сайта и служебное ─────────────────────────────────────
+  if (row.action === 'site_toggle' || row.action === 'set_site_enabled') {
+    out.to = /false|off|0/.test(detail) ? 'сайт выключен' : 'сайт включён'
+    return out
+  }
+  if (row.action === 'semester_reset') {
+    out.to = 'расписание группы сброшено'
+    return out
+  }
+  if (row.action === 'group_create') {
+    const name = stripIds(detail)
+    out.to = name ? 'создана группа ' + name : 'создана группа'
+    return out
+  }
+  if (row.action === 'group_deactivate') {
+    const name = stripIds(detail)
+    out.to = name ? 'группа отключена: ' + name : 'группа отключена'
+    return out
+  }
+
+  // ── Всё остальное: без id, человеческой фразой ──────────────────────
+  const clean = stripIds(detail)
+  out.to = clean || 'действие без подробностей'
+  return out
 }
 
 /** Фильтр по типу события. */
@@ -12177,7 +12333,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=153`, { scope: base })
+    .register(`${base}sw.js?v=154`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
