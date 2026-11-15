@@ -1,0 +1,90 @@
+{
+ "steps": [
+  {
+   "label": "boot",
+   "len": 14053,
+   "nodes": 247,
+   "buttons": 43,
+   "hash": "2d27e7eea84d61d6"
+  },
+  {
+   "label": "tab home",
+   "len": 14053,
+   "nodes": 247,
+   "buttons": 43,
+   "hash": "2d27e7eea84d61d6"
+  },
+  {
+   "label": "tab schedule",
+   "len": 14070,
+   "nodes": 247,
+   "buttons": 43,
+   "hash": "f8aeef7a9bdc65df"
+  },
+  {
+   "label": "tab grades",
+   "len": 14086,
+   "nodes": 247,
+   "buttons": 43,
+   "hash": "3189c55329649135"
+  },
+  {
+   "label": "tab teachers",
+   "len": 14111,
+   "nodes": 247,
+   "buttons": 43,
+   "hash": "e576f5a512a1f716"
+  },
+  {
+   "label": "tab more",
+   "len": 14091,
+   "nodes": 247,
+   "buttons": 43,
+   "hash": "38e624acbf19dee8"
+  },
+  {
+   "label": "more:students",
+   "missing": true
+  },
+  {
+   "label": "more:my-code",
+   "missing": true
+  },
+  {
+   "label": "more:contacts",
+   "len": 8915,
+   "nodes": 163,
+   "buttons": 34,
+   "hash": "3d8c890565cd150d"
+  },
+  {
+   "label": "more:overrides",
+   "len": 8922,
+   "nodes": 162,
+   "buttons": 34,
+   "hash": "d52999d7be37e544"
+  },
+  {
+   "label": "more:group",
+   "len": 8915,
+   "nodes": 163,
+   "buttons": 34,
+   "hash": "3d8c890565cd150d"
+  },
+  {
+   "label": "more:support",
+   "len": 10617,
+   "nodes": 190,
+   "buttons": 35,
+   "hash": "7d7fff73c93bb0c0"
+  },
+  {
+   "label": "after 1 clicks",
+   "len": 6751,
+   "nodes": 190,
+   "buttons": 61,
+   "hash": "37b520ce59e3f47d"
+  }
+ ],
+ "errors": []
+}

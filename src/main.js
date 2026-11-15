@@ -138,6 +138,10 @@ import {
   groupByDate,
 } from './lib/schedule-import.js'
 import { privacyParagraphs, termsParagraphs } from './lib/legal.js'
+import { UI_FEEL, UI_MOTION, delay, ensureToastWrap, flash, hapticTap, motionOk, paintFlashSlot, prefersReducedMotion, showToast, textNode, setRenderFn } from './lib/ui-feedback.js'
+
+// Внедряем функции из main.js в вынесенный модуль
+setRenderFn(render)
 
 const SELECTED_GROUP_KEY = 'rasp_selected_group_v3'
 const THEME_KEY = 'rasp_theme_v1'
@@ -384,10 +388,6 @@ function renderInstallCard() {
       : null,
     installStepsNode(),
   ])
-}
-
-function textNode(s) {
-  return document.createTextNode(s == null ? '' : String(s))
 }
 
 function normalizePeopleQuery(s) {
@@ -645,50 +645,6 @@ function ensureOverrideDraft() {
     }
   }
   return state.overrideDraft
-}
-
-// Тосты живут поверх layout (на body), поэтому не сдвигают контент и переживают render().
-let toastWrap = null
-function ensureToastWrap() {
-  if (toastWrap && document.body.contains(toastWrap)) return toastWrap
-  toastWrap = el('div', { className: 'toast-wrap', 'aria-live': 'polite', 'aria-atomic': 'true' })
-  document.body.append(toastWrap)
-  return toastWrap
-}
-
-function showToast(text, isError = false) {
-  const msg = (text || '').toString().trim()
-  if (!msg) return
-  const wrap = ensureToastWrap()
-  const toast = el('div', { className: `toast${isError ? ' toast-error' : ''}`, role: 'status' }, [
-    textNode(msg),
-  ])
-  wrap.append(toast)
-  if (motionOk()) {
-    requestAnimationFrame(() => toast.classList.add('is-in'))
-  } else {
-    toast.classList.add('is-in')
-  }
-  const dismiss = () => {
-    if (toast.dataset.gone === '1') return
-    toast.dataset.gone = '1'
-    toast.classList.remove('is-in')
-    toast.classList.add('is-out')
-    window.setTimeout(() => toast.remove(), 280)
-  }
-  toast.addEventListener('click', dismiss)
-  window.setTimeout(dismiss, 2800)
-}
-
-// Оставлено для совместимости: баннер больше не рисуем, сообщения идут тостами.
-function paintFlashSlot() {
-  const slot = document.getElementById('flash-slot')
-  if (slot) slot.replaceChildren()
-}
-
-function flash(text, isError = false) {
-  showToast(text, isError)
-  render({ force: true })
 }
 
 function selectGroup(id) {
@@ -4622,7 +4578,6 @@ function renderScheduleImport() {
   return box
 }
 
-
 function renderAdminPanel() {
   const box = el('div', { className: 'card admin-panel' })
   box.append(
@@ -6539,12 +6494,6 @@ const HW_EMPTY_QUIET = true
 /** false = плоский список ДЗ; дни на вкладке ДЗ снова «только подсветка» (бэкап: ui-backups/hw-day-jump-before-2026-10-01.md) */
 const HW_TAB_BY_DAY = true
 
-/**
- * false = без лёгких анимаций (бэкап: ui-backups/ui-motion-before-2026-10-01.md)
- * — резкое раскрытие ДЗ, фото в новой вкладке, прежняя смена вкладок
- */
-const UI_MOTION = true
-
 /** false = мгновенная смена Пн–Пт без анимации (бэкап: ui-backups/day-swap-before-2026-10-05) */
 const DAY_SWAP_MOTION = true
 
@@ -6564,10 +6513,6 @@ const BOOT_SPLASH_EXIT_MS = 420
 /** true, пока с Supabase не подтянулись реальные ДЗ (для скелетонов) */
 let initialDataLoading = true
 
-function delay(ms) {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
 /** F5 / pull-reload — без заставки. Полное закрытие Chrome → type=navigate → с анимацией. */
 function isPageReload() {
   try {
@@ -6576,31 +6521,6 @@ function isPageReload() {
     return performance.navigation?.type === 1
   } catch {
     return false
-  }
-}
-
-function prefersReducedMotion() {
-  try {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  } catch {
-    return false
-  }
-}
-
-function motionOk() {
-  return UI_MOTION && !prefersReducedMotion()
-}
-
-/** false = без вибро-отклика и pull-to-refresh (бэкап: ui-backups/ui-feel-before-2026-10-02.md) */
-const UI_FEEL = true
-
-/** Короткая тактильная отдача на нажатие (телефоны, где поддерживается) */
-function hapticTap(ms = 10) {
-  if (!UI_FEEL) return
-  try {
-    if (navigator.vibrate) navigator.vibrate(ms)
-  } catch {
-    /* ignore */
   }
 }
 
@@ -9034,8 +8954,6 @@ function renderProgramEditor(kind) {
     }
   })
 
-
-
   file.addEventListener('change', async () => {
     if (!file.files?.length) return
     const room = MAX_NEWS_PHOTOS - draft.attachments.length
@@ -9365,7 +9283,6 @@ function renderHome() {
     const composer = renderNewsComposer(group)
     if (composer) wrap.append(composer)
   }
-
 
   if (!group) {
     wrap.append(
@@ -9717,7 +9634,6 @@ function splitNewsMedia(attachments) {
   return { photos, videos }
 }
 
-
 /**
  * Блокировка прокрутки фона, пока открыт полноэкранный просмотр.
  * Снимать надо ВСЕГДА с обоих узлов: раньше в одном месте чистили только <html>,
@@ -10030,7 +9946,6 @@ function openNewsReader(items, startIndex = 0) {
     goTo(next, delta > 0 ? 1 : -1)
   }
 
-
   const edit = (i) => {
     const item = list[i]
     if (!item) return
@@ -10120,7 +10035,6 @@ function openNewsReader(items, startIndex = 0) {
     goTo,
     onClose: close,
   })
-
 
   const onKey = (e) => {
     if (e.key === 'Escape') close()
@@ -11568,7 +11482,6 @@ window.addEventListener(
   { passive: true },
 )
 
-
 function render(opts = {}) {
   const force = !!opts.force
   const root = document.getElementById('app')
@@ -11584,7 +11497,6 @@ function render(opts = {}) {
   ) {
     document.body.style.overflow = ''
   }
-
 
   const session = getSession()
   const adminHere = session?.role === 'admin'

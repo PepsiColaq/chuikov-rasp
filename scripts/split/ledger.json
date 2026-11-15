@@ -1,0 +1,19 @@
+{
+ "modules": {
+  "ui": "lib/ui-feedback.js"
+ },
+ "names": {
+  "UI_MOTION": "./lib/ui-feedback.js",
+  "UI_FEEL": "./lib/ui-feedback.js",
+  "prefersReducedMotion": "./lib/ui-feedback.js",
+  "motionOk": "./lib/ui-feedback.js",
+  "hapticTap": "./lib/ui-feedback.js",
+  "delay": "./lib/ui-feedback.js",
+  "textNode": "./lib/ui-feedback.js",
+  "toastWrap": "./lib/ui-feedback.js",
+  "ensureToastWrap": "./lib/ui-feedback.js",
+  "showToast": "./lib/ui-feedback.js",
+  "paintFlashSlot": "./lib/ui-feedback.js",
+  "flash": "./lib/ui-feedback.js"
+ }
+}

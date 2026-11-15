@@ -1,0 +1,26 @@
+{
+ "ui": {
+  "file": "lib/ui-feedback.js",
+  "header": "// Мелкие отклики интерфейса: тосты, вибрация, анимации, паузы.\n// Вынесено из main.js: этим пользуются почти все экраны, и держать их\n// в одном файле с версткой было неудобно.\n//\n// Важно: flash() раньше вызывал render() напрямую — теперь функция\n// отрисовки внедряется из main.js через setRenderFn(), иначе получился бы\n// циклический импорт main ⇄ ui-feedback.",
+  "names": [
+   "UI_MOTION",
+   "UI_FEEL",
+   "prefersReducedMotion",
+   "motionOk",
+   "hapticTap",
+   "delay",
+   "textNode",
+   "toastWrap",
+   "ensureToastWrap",
+   "showToast",
+   "paintFlashSlot",
+   "flash"
+  ],
+  "inject": {
+   "render": "setRenderFn"
+  },
+  "internal": [
+   "toastWrap"
+  ]
+ }
+}

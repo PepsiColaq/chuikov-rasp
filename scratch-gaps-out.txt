@@ -1,0 +1,28 @@
+5895-5902  (8 строк) КОД: 4 строк
+    |    Раньше здесь была одна склеенная строка из технических полей:
+    |    «14.11.2026 00:03 · journal_mark · admin · g_0903_пд3 · ip … · Иванов».
+    |    Из неё нельзя было понять ни что случилось, ни кто это сделал.
+    |    Теперь — карточка на событие с человеческим описанием. */
+5959-5966  (8 строк) КОД: 4 строк
+    |    Задача: админ не должен видеть технические идентификаторы. Вместо
+    |    «hw_5ed4588c1cb2fc31» — что это за задание, вместо «jg_7247…» — кому
+    |    и какая оценка. Всё, что не удалось разобрать по известному формату,
+    |    показывается человеческой фразой, а не сырой строкой из базы. */
+# MUTABLE TOP-LEVEL (let) -> where reassigned
+deferredInstallPrompt: __stmt, tryNativeInstall
+installPromptReady: __stmt, tryNativeInstall
+toastWrap: ensureToastWrap
+hwLightboxEl: closeHwLightbox, openHwLightbox
+hwLightboxKeyHandler: closeHwLightbox, openHwLightbox
+formationLoadKey: loadFormationDay
+initialDataLoading: boot
+tabSwitchShieldUntil: switchTab, swipeFinish
+heroAutoTimer: startHeroAutoSlide
+heroAutoObserver: startHeroAutoSlide
+syncBusy: syncFromCloud
+syncQueued: syncFromCloud
+pendingRedraw: softRefreshCurrentTab, redrawAfterData, boot, syncFromCloud, tryFlushPendingRedraw
+lastSig: syncFromCloud
+syncTimer: scheduleSync
+pollTimer: schedulePoll
+pollInterval: schedulePoll
