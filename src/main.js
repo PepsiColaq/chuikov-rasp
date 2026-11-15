@@ -6054,15 +6054,39 @@ function parseAuditDetail(row) {
     }
   }
 
-  if (row.action === 'news_add' || row.action === 'program_save') {
-    out.to = detail
+  if (row.action === 'program_save') {
+    const snapshot = (Array.isArray(row.undo) ? row.undo : []).find(
+      (u) => u && u.tbl === 'programs' && (u.new || u.old),
+    )
+    const record = snapshot?.new || snapshot?.old || null
+    out.to = record && record.title ? String(record.title) : detail
     return out
   }
 
   if (row.action === 'homework_add' || row.action === 'homework_delete') {
+    // detail: «Никита · Тактико-специальная подготовка · hw_…».
+    // Первая часть — автор, её уже показывает подпись карточки.
+    // Предмет и текст берём из снимка: там настоящие значения.
     const parts = detail.split(' · ')
-    out.to = parts[0] || detail
-    if (parts[1]) out.note = parts[1]
+    const subject = parts.length >= 2 ? parts[1] : ''
+    const snapshot = (Array.isArray(row.undo) ? row.undo : []).find(
+      (u) => u && (u.tbl === 'homework' || u.tbl === 'news') && (u.new || u.old),
+    )
+    const record = snapshot?.new || snapshot?.old || null
+    const body = record && typeof record === 'object' ? String(record.body || '').trim() : ''
+    out.to = subject || (record && record.subject ? String(record.subject) : '')
+    if (body) out.note = body.length > 240 ? body.slice(0, 240) + '…' : body
+    return out
+  }
+
+  if (row.action === 'news_add') {
+    const snapshot = (Array.isArray(row.undo) ? row.undo : []).find(
+      (u) => u && u.tbl === 'news' && (u.new || u.old),
+    )
+    const record = snapshot?.new || snapshot?.old || null
+    out.to = record && record.title ? String(record.title) : detail
+    const body = record && typeof record === 'object' ? String(record.body || '').trim() : ''
+    if (body) out.note = body.length > 240 ? body.slice(0, 240) + '…' : body
     return out
   }
 
@@ -12153,7 +12177,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=152`, { scope: base })
+    .register(`${base}sw.js?v=153`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
