@@ -143,6 +143,11 @@ import { ATT_LABEL, AUDIT_FILTERS, AUDIT_TITLES, BOOT_SPLASH, BOOT_SPLASH_EXIT_M
 import { SELECTED_GROUP_KEY, THEME_KEY, WEEK_MAX, applyTheme, splashStartedAt, state } from './lib/app-state.js'
 import { installStepsNode, isAndroidDevice, isIosDevice, isStandaloneApp, renderInstallCard, setInstallHelpOpen, tryNativeInstall } from './lib/install.js'
 import { attachmentImageCandidates, bindFileDownload, bindImgCandidates, closeHwLightbox, collectHwPhotoEntries, isImageMime, looksLikeHwImage, openHwLightbox, renderHwAttachments, safeStorageUrl } from './features/lightbox.js'
+import { wireHub } from './app/hub.js'
+
+// Отдаём вынесенным модулям функции, которые остаются здесь.
+// До этого вызова в hub лежат пустышки — модули не падают, а просто ничего не делают.
+wireHub({ cancelGroupPicker, confirmAndLogout, gotoTab, homeProgramKind, isHwView, maybeSeekHwDay, openGroupPicker, openImageCropEditor, openMoreScreen, openNewsReader, openProgramReader, openProgramScreen, paintStaffCard, pickGroupWithFeel, programGroupId, redrawAfterData, refreshTabPanes, render, renderAddHwInline, renderAdminFreeRooms, renderAdminPanel, renderAuditSection, renderBannedGate, renderClosedGate, renderDays, renderFormationCard, renderFormationMarksOverlay, renderFormationSettings, renderGroupPicker, renderHome, renderHomeHero, renderHomeNow, renderHomeTextSettings, renderHwCard, renderHwTab, renderInlineHwGroups, renderLegalDoc, renderLessonCard, renderMonthCalendar, renderMore, renderMoreClassic, renderMoreContacts, renderMoreGroup, renderMoreMyCode, renderMoreOverrides, renderMoreStudents, renderMoreSupport, renderMoreV2, renderNav, renderNewsComposer, renderNowStrip, renderOverrideForm, renderOverridesTab, renderProfileAvatarControls, renderProgramEditor, renderPrograms, renderRoomSearch, renderSchedule, renderScheduleImport, renderSessionSettings, renderStudyTab, renderTabBody, renderTeacherSearch, renderTeachersTab, renderTop, resetWindowScroll, selectGroup, softRefreshCurrentTab, softUpdateNav, softUpdateTopLead, switchTab, withTabScrollPreserved, wrapAdminAcc })
 
 // Внедряем функции из main.js в вынесенный модуль
 setRenderFn(render)

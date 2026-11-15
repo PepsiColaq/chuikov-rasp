@@ -37,10 +37,67 @@ const GLOBALS = new Set([
 
 const args = process.argv.slice(2)
 const DRY = args.includes('--dry')
+const INIT_HUB = args.includes('--init-hub')
 const MODULE_KEY = (() => {
   const i = args.indexOf('--module')
   return i >= 0 ? args[i + 1] : null
 })()
+
+if (INIT_HUB) {
+  // Одноразовая операция: подключить мост в main.js и зарегистрировать в нём функции.
+  const { src, ast } = parse(MAIN)
+  const HUB_FNS = [
+    'render', 'refreshTabPanes', 'softRefreshCurrentTab', 'redrawAfterData',
+    'switchTab', 'gotoTab', 'openMoreScreen', 'openProgramScreen',
+    'softUpdateNav', 'softUpdateTopLead', 'withTabScrollPreserved',
+    'resetWindowScroll', 'openImageCropEditor', 'renderAdminPanel',
+    'renderAdminFreeRooms', 'renderOverrideForm', 'renderOverridesTab',
+    'renderGroupPicker', 'wrapAdminAcc', 'renderHomeTextSettings',
+    'renderFormationSettings', 'renderSessionSettings', 'renderScheduleImport',
+    'renderAuditSection', 'renderLegalDoc', 'renderMoreSupport',
+    'renderProfileAvatarControls', 'renderPrograms', 'openProgramReader',
+    'renderProgramEditor', 'renderHome', 'renderHomeHero', 'renderNewsComposer',
+    'renderHomeNow', 'renderTabBody', 'renderStudyTab', 'openNewsReader',
+    'openGroupPicker', 'selectGroup', 'confirmAndLogout', 'renderBannedGate',
+    'renderClosedGate', 'renderNav', 'renderDays', 'renderSchedule',
+    'renderLessonCard', 'renderHwTab', 'renderHwCard', 'renderFormationCard',
+    'renderMore', 'renderMoreV2', 'renderMoreClassic', 'renderMoreStudents',
+    'renderMoreMyCode', 'renderMoreContacts', 'renderMoreOverrides',
+    'renderMoreGroup', 'renderMoreV2', 'renderTeachersTab', 'renderRoomSearch',
+    'renderTeacherSearch', 'renderTop', 'renderMonthCalendar', 'renderNowStrip',
+    'openHwLightbox', 'closeHwLightbox', 'renderHwAttachments',
+    'renderInstallCard', 'setInstallHelpOpen', 'paintStaffCard',
+    'renderAddHwInline', 'renderInlineHwGroups', 'renderFormationMarksOverlay',
+    'maybeSeekHwDay', 'cancelGroupPicker', 'pickGroupWithFeel',
+    'renderGroupPicker', 'isHwView', 'homeProgramKind', 'programGroupId',
+  ]
+
+  const declared = new Set()
+  for (const n of ast.body) {
+    if (n.type === 'FunctionDeclaration') declared.add(n.id.name)
+    if (n.type === 'VariableDeclaration')
+      for (const d of n.declarations) if (d.id.type === 'Identifier') declared.add(d.id.name)
+  }
+  const present = [...new Set(HUB_FNS)].filter((n) => declared.has(n))
+
+  const lastImportEnd = ast.body.filter((n) => n.type === 'ImportDeclaration').pop().end
+  const block =
+    `\nimport { wireHub } from './app/hub.js'` +
+    `\n\n// Отдаём вынесенным модулям функции, которые остаются здесь.\n` +
+    `// До этого вызова в hub лежат пустышки — модули не падают, а просто ничего не делают.\n` +
+    `wireHub({ ${present.sort().join(', ')} })`
+  const out = src.slice(0, lastImportEnd) + block + src.slice(lastImportEnd)
+
+  if (DRY) {
+    console.log('Функции для моста:', present.length)
+    console.log(present.sort().join(', '))
+    process.exit(0)
+  }
+  fs.writeFileSync(MAIN, out)
+  console.log(`✓ Мост подключён, функций: ${present.length}`)
+  process.exit(0)
+}
+
 
 function parse(file) {
   const src = fs.readFileSync(file, 'utf8')
@@ -220,6 +277,7 @@ if (alreadyMoved.length) throw new Error(`Уже вынесены: ${alreadyMove
 // ── что нужно модулю извне
 const localSet = new Set(cfg.names)
 const inject = cfg.inject || {} // имя -> имя сеттера
+const hubNames = new Set() // имена, которые модуль берёт из моста (app/hub.js)
 const needFromModules = new Map() // module file -> Set(names)
 const needFromLib = new Map() // source -> Set(names)
 const unresolved = new Map() // name -> [decls внутри модуля, где встретилось]
@@ -246,10 +304,14 @@ for (const name of cfg.names) {
 }
 
 if (unresolved.size) {
-  console.error(`\n❌ Нельзя вынести ${MODULE_KEY}: эти имена остаются в main.js`)
-  for (const [n, who] of unresolved) console.error(`   ${n}  ← используется в: ${[...who].join(', ')}`)
-  console.error('\nСначала вынеси их в отдельный модуль (или в bridge.js), потом повтори.')
-  process.exit(1)
+  if (!cfg.viaHub) {
+    console.error(`\n❌ Нельзя вынести ${MODULE_KEY}: эти имена остаются в main.js`)
+    for (const [n, who] of unresolved) console.error(`   ${n}  ← используется в: ${[...who].join(', ')}`)
+    console.error('\nСначала вынеси их в отдельный модуль (или включи viaHub), потом повтори.')
+    process.exit(1)
+  }
+  // viaHub: функция остаётся в main.js, а модуль зовёт её через мост
+  for (const n of unresolved.keys()) hubNames.add(n)
 }
 
 // ── собираем текст модуля
@@ -272,7 +334,21 @@ parts.push('')
 for (const [src, names] of needFromModules)
   parts.push(`import { ${[...names].sort().join(', ')} } from '${relImport(src)}'`)
 for (const [src, names] of needFromLib) parts.push(`import { ${[...names].sort().join(', ')} } from '${relImport(src)}'`)
-if (needFromModules.size || needFromLib.size) parts.push('')
+if (hubNames.size) {
+  const hubRel = relImport('app/hub.js')
+  parts.push(`import { hub } from '${hubRel}'`)
+}
+if (needFromModules.size || needFromLib.size || hubNames.size) parts.push('')
+
+// Функции, оставшиеся в main.js: вызываем через мост, чтобы не было цикла.
+// hub заполняется при старте приложения (wireHub в main.js).
+if (hubNames.size) {
+  parts.push('// Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).')
+  for (const n of [...hubNames].sort()) {
+    parts.push(`const ${n} = (...args) => hub.${n}(...args)`)
+  }
+  parts.push('')
+}
 
 // внедряемые снаружи функции: let renderImpl = null; export function setRenderFn(fn) { renderImpl = fn }
 for (const [name, setter] of Object.entries(inject)) {
@@ -297,8 +373,11 @@ for (const name of cfg.names) {
     (m, ws, a) => `${ws}export ${a || ''}function ${name}`
   )
   if (withExport !== text) parts.push(withExport)
-  else if (d.kind === 'let' || d.kind === 'var') parts.push(text.replace(/^(let|var)\s/m, 'export let '))
-  else if (d.kind === 'const') parts.push(text.replace(/^const\s/m, 'export const '))
+  else if (d.kind === 'let' || d.kind === 'var') {
+    // изменяемые переменные не выносим: им присваивают из main.js, а импортированной
+    // переменной присвоить нельзя — пришлось бы городить сеттеры на каждый чих
+    throw new Error(`${name} объявлена как ${d.kind} и переприсваивается — оставь её в main.js`)
+  } else if (d.kind === 'const') parts.push(text.replace(/^const\s/m, 'export const '))
   else if (d.kind === 'class') parts.push(text.replace(/^class\s/m, 'export class '))
   else throw new Error('Не понял, как экспортировать ' + name)
   parts.push('')
@@ -443,14 +522,45 @@ const injectLines = Object.entries(inject)
 
 const ast2 = acorn.parse(newMain, { ecmaVersion: 'latest', sourceType: 'module' })
 const lastImportEnd = ast2.body.filter((n) => n.type === 'ImportDeclaration').pop().end
+
+// viaHub: импорт wireHub + регистрация настоящих функций из main.js
+let hubImportLine = ''
+let hubWireBlock = ''
+if (hubNames.size) {
+  hubImportLine = `import { wireHub } from './app/hub.js'`
+  const sorted = [...hubNames].sort()
+  hubWireBlock =
+    '\n\n// Отдаём вынесенным модулям функции, которые остались здесь\n' +
+    `wireHub({ ${sorted.join(', ')} })`
+}
+
 const finalMain =
   newMain.slice(0, lastImportEnd) +
   '\n' +
   importLine +
+  (hubImportLine ? '\n' + hubImportLine : '') +
   (injectLines ? '\n\n// Внедряем функции из main.js в вынесенный модуль\n' + injectLines : '') +
+  hubWireBlock +
   newMain.slice(lastImportEnd)
 
 fs.writeFileSync(MAIN, finalMain)
+
+// ── дополняем app/hub.js новыми именами, чтобы у них были пустышки до wireHub
+if (hubNames.size) {
+  const hubPath = path.join(ROOT, 'src/app/hub.js')
+  let hubSrc = fs.readFileSync(hubPath, 'utf8')
+  const added = []
+  for (const n of [...hubNames].sort()) {
+    if (new RegExp(`^\\s*${n}: noop,`, 'm').test(hubSrc)) continue
+    added.push(n)
+  }
+  if (added.length) {
+    const block = added.map((n) => `  ${n}: noop,`).join('\n')
+    hubSrc = hubSrc.replace(/(export const hub = \{\n)/, `$1${block}\n`)
+    fs.writeFileSync(hubPath, hubSrc)
+  }
+  console.log(`через мост: ${[...hubNames].sort().join(', ')}`)
+}
 
 // ── ledger
 ledger.modules[MODULE_KEY] = cfg.file
