@@ -12203,7 +12203,34 @@ function tryFlushPendingRedraw() {
 }
 
 // Синхронизация без Realtime/WebSocket — через прокси WS часто рвётся и всё лагает.
-// Broadcast-пинг между вкладками + короткий опрос.
+// Broadcast-пинг между вкладками + адаптивный опрос.
+//
+// Почему не фиксированные 8 секунд:
+// расписание меняется раз в день, ДЗ — несколько раз в день. Опрос каждые
+// 8 секунд тратил трафик впустую (5,8 КБ × 450 раз в час) и съедал лимит
+// бесплатной базы. Теперь частота зависит от того, смотрит ли человек на сайт.
+const POLL_ACTIVE_MS = 10_000 // вкладка открыта: изменения видны почти сразу
+const POLL_BACKGROUND_MS = 60_000 // вкладка свёрнута: хватает раза в минуту
+
+let pollTimer = null
+let pollInterval = 0
+
+function isPageVisible() {
+  return typeof document !== 'undefined' && document.visibilityState === 'visible'
+}
+
+function schedulePoll() {
+  const want = isPageVisible() ? POLL_ACTIVE_MS : POLL_BACKGROUND_MS
+  if (pollTimer && want === pollInterval) return
+  if (pollTimer) clearInterval(pollTimer)
+  pollInterval = want
+  pollTimer = setInterval(() => {
+    // В фоне — раз в минуту: этого хватает, чтобы при возврате данные были
+    // свежими, но не тратит трафик и батарею как прежние 8 секунд.
+    scheduleSync('poll')
+  }, want)
+}
+
 if (supabaseConfigured && supabase) {
   try {
     startPeersChannel(() => scheduleSync('peer'))
@@ -12212,13 +12239,19 @@ if (supabaseConfigured && supabase) {
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') scheduleSync('visible')
+    if (document.visibilityState === 'visible') {
+      // Вернулись на вкладку — переключаем частоту и сразу подтягиваем свежее.
+      schedulePoll()
+      scheduleSync('visible')
+    } else {
+      schedulePoll()
+    }
   })
   window.addEventListener('focus', () => scheduleSync('focus'))
   window.addEventListener('pageshow', () => scheduleSync('pageshow'))
   // НЕ flush на pointerdown — иначе перед свайпом полный render сносит кэш вкладок
 
-  setInterval(() => scheduleSync('poll'), 8000)
+  schedulePoll()
   setInterval(() => tryFlushPendingRedraw(), 2000)
 }
 
@@ -12244,7 +12277,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=156`, { scope: base })
+    .register(`${base}sw.js?v=157`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
