@@ -183,5 +183,38 @@
   "internal": [
    "formationLoadKey"
   ]
+ },
+ "admin": {
+  "file": "screens/admin.js",
+  "viaHub": true,
+  "header": "// Админ-панель: коды доступа, доп. админы, поддержка, настройки сайта,\n// группы, статистика и журнал событий.\n//\n// Это самая большая функция в проекте была renderAdminPanel — 1269 строк\n// в одном теле. Теперь она здесь, вместе с секциями и разбором журнала.",
+  "names": [
+   "renderAdminFreeRooms",
+   "renderOverrideForm",
+   "renderOverridesTab",
+   "renderGroupPicker",
+   "isAdminSectionOpen",
+   "toggleAdminSection",
+   "wrapAdminAcc",
+   "saveAppSettings",
+   "renderHomeTextSettings",
+   "renderFormationSettings",
+   "renderSessionSettings",
+   "scheduleImport",
+   "renderScheduleImport",
+   "renderAdminPanel",
+   "auditTitle",
+   "auditGroupName",
+   "auditWhen",
+   "auditSnapshot",
+   "parseAuditDetail",
+   "renderAuditSection",
+   "auditCard",
+   "downloadAuditCsv",
+   "renderLegalDoc"
+  ],
+  "internal": [
+   "scheduleImport"
+  ]
  }
 }

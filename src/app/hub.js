@@ -17,6 +17,15 @@
 const noop = () => {}
 
 export const hub = {
+  auditDate: noop,
+  homeNoLessonsText: noop,
+  normalizePeopleQuery: noop,
+  resolveFreeRoomsSlotKey: noop,
+  roleRu: noop,
+  stripIds: noop,
+  teacherDateLabel: noop,
+  typeLabel: noop,
+  weekdayFromISO: noop,
   calendarDateForWeekday: noop,
   canEdit: noop,
   dateForWeekday: noop,

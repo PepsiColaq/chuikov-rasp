@@ -5,7 +5,8 @@
   "state": "lib/app-state.js",
   "install": "lib/install.js",
   "lightbox": "features/lightbox.js",
-  "schedule": "screens/schedule.js"
+  "schedule": "screens/schedule.js",
+  "admin": "screens/admin.js"
  },
  "names": {
   "UI_MOTION": "./lib/ui-feedback.js",
@@ -102,6 +103,29 @@
   "renderAuthorChip": "./screens/schedule.js",
   "linkifyHwText": "./screens/schedule.js",
   "renderHwCard": "./screens/schedule.js",
-  "formationLoadKey": "./screens/schedule.js"
+  "formationLoadKey": "./screens/schedule.js",
+  "renderAdminFreeRooms": "./screens/admin.js",
+  "renderOverrideForm": "./screens/admin.js",
+  "renderOverridesTab": "./screens/admin.js",
+  "renderGroupPicker": "./screens/admin.js",
+  "isAdminSectionOpen": "./screens/admin.js",
+  "toggleAdminSection": "./screens/admin.js",
+  "wrapAdminAcc": "./screens/admin.js",
+  "saveAppSettings": "./screens/admin.js",
+  "renderHomeTextSettings": "./screens/admin.js",
+  "renderFormationSettings": "./screens/admin.js",
+  "renderSessionSettings": "./screens/admin.js",
+  "scheduleImport": "./screens/admin.js",
+  "renderScheduleImport": "./screens/admin.js",
+  "renderAdminPanel": "./screens/admin.js",
+  "auditTitle": "./screens/admin.js",
+  "auditGroupName": "./screens/admin.js",
+  "auditWhen": "./screens/admin.js",
+  "auditSnapshot": "./screens/admin.js",
+  "parseAuditDetail": "./screens/admin.js",
+  "renderAuditSection": "./screens/admin.js",
+  "auditCard": "./screens/admin.js",
+  "downloadAuditCsv": "./screens/admin.js",
+  "renderLegalDoc": "./screens/admin.js"
  }
 }
