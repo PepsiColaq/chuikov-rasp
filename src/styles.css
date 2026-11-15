@@ -69,15 +69,21 @@ a {
   color: var(--accent);
 }
 
+:root {
+  /* Реальная высота нижнего меню: его задают --nav-pad-y, иконка 23px,
+     подпись 10px и safe-area. Раньше здесь стояло жёсткое «78px»,
+     и при иконках + отступе под жест iPhone низ страницы уезжал под меню. */
+  --nav-h: 84px;
+}
+
 #app {
   max-width: 480px;
   margin: 0 auto;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  /* Высота нижнего меню + отступ под жест iPhone: 72px не хватало,
-     и низ страницы уезжал под меню. */
-  padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+  /* Высота нижнего меню + небольшой запас под жест iPhone. */
+  padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 8px);
   box-sizing: border-box;
 }
 
@@ -2763,6 +2769,11 @@ html.hw-lightbox-open {
   max-height: 100%;
   min-height: 0;
   align-self: stretch;
+  /* Запас снизу прямо в прокручиваемой области: иначе последний блок
+     (кнопки ролей, плитки на главной) упирается в нижнее меню и его
+     не видно. Padding у скроллера добавляет место в конце прокрутки. */
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: 16px;
 }
 
 .tab-pane-inner {
@@ -3540,6 +3551,9 @@ html.ptr-on body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Запас снизу: последние плитки («Кружки», «Техподдержка») упирались
+     в нижнее меню, и до них нельзя было доскроллить. */
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Верхняя строка: колледж + группа */
@@ -5458,20 +5472,38 @@ html[data-theme='dark'] .home-feed-due.is-overdue {
 }
 
 .staff-assign-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  display: grid;
+  /* Кнопки в один столбец: три штуки в ряд сжимались, и текст
+     «Разрешить вести ленту» обрезался до нечитаемого. */
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+
+@media (min-width: 380px) {
+  .staff-assign-actions {
+    /* На широком экране — две в ряд, третья на всю ширину. */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .staff-assign-actions .staff-btn.is-news {
+    grid-column: 1 / -1;
+  }
 }
 
 .staff-btn {
-  flex: 1 1 140px;
-  padding: 9px 12px;
+  width: 100%;
+  padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 12.5px;
   font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  /* Длинный текст переносится, а не обрезается многоточием. */
+  white-space: normal;
+  overflow-wrap: anywhere;
   cursor: pointer;
 }
 

@@ -7135,6 +7135,18 @@ function paintStaffCard(host, students) {
       }
     }
 
+    /** Смена роли в students: староста/препод → обычный студент и обратно. */
+    const changeRole = async (studentId, role) => {
+      try {
+        await setStudentRole(studentId, role)
+        const next = await staffList(groupId)
+        build(next)
+        showToast(role === 'student' ? 'Теперь обычный студент' : 'Роль обновлена')
+      } catch (err) {
+        showToast(err.message, true)
+      }
+    }
+
     // Компактный список: только те, у кого есть роль, плюс кнопка «назначить».
     const rows = students.filter((st) => {
       const id = String(st.id)
@@ -7237,6 +7249,18 @@ function paintStaffCard(host, students) {
     const revoke = (st) => {
       const id = String(st.id)
       const btns = []
+      // Роль «староста» хранится в students.role, а не в group_staff,
+      // поэтому её не было видно в списке ниже — и снять было нечем.
+      if ((st.role === 'starosta' || st.role === 'teacher') && canSetDeputy) {
+        btns.push(
+          el('button', {
+            type: 'button',
+            className: 'staff-revoke',
+            text: st.role === 'teacher' ? 'снять препода' : 'снять старосту',
+            onClick: () => changeRole(id, 'student'),
+          }),
+        )
+      }
       if (deputyIds.has(id) && canSetDeputy) {
         btns.push(
           el('button', {
@@ -12333,7 +12357,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=154`, { scope: base })
+    .register(`${base}sw.js?v=155`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
