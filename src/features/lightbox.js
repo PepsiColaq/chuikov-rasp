@@ -250,6 +250,11 @@ export function renderHwAttachments(attachments, legacyImages, galleryCtx = null
 
 let hwLightboxEl = null
 
+/** Открыт ли сейчас полноэкранный просмотр фото (для блокировки свайпов). */
+export function isHwLightboxOpen() {
+  return !!hwLightboxEl
+}
+
 let hwLightboxKeyHandler = null
 
 export function closeHwLightbox({ animate = true } = {}) {

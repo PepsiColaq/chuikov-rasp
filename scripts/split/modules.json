@@ -318,8 +318,6 @@
    "tabLeadText",
    "tabSwitchShieldUntil",
    "refreshTabPanes",
-   "softRefreshCurrentTab",
-   "redrawAfterData",
    "switchTab",
    "gotoTab",
    "openMoreScreen",
@@ -335,8 +333,7 @@
    "openGroupPicker",
    "cancelGroupPicker",
    "confirmAndLogout",
-   "sessionPillText",
-   "programsLoaded"
+   "sessionPillText"
   ]
  },
  "pager": {

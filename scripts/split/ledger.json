@@ -12,7 +12,8 @@
   "more": "screens/more.js",
   "time": "lib/time.js",
   "directory": "screens/directory.js",
-  "pager": "app/pager.js"
+  "pager": "app/pager.js",
+  "navigation": "app/navigation.js"
  },
  "names": {
   "UI_MOTION": "./lib/ui-feedback.js",
@@ -235,6 +236,25 @@
   "renderTabBody": "./app/pager.js",
   "renderStudyTab": "./app/pager.js",
   "softUpdateNav": "./app/pager.js",
-  "softUpdateTopLead": "./app/pager.js"
+  "softUpdateTopLead": "./app/pager.js",
+  "tabLeadText": "./app/navigation.js",
+  "tabSwitchShieldUntil": "./app/navigation.js",
+  "refreshTabPanes": "./app/navigation.js",
+  "switchTab": "./app/navigation.js",
+  "gotoTab": "./app/navigation.js",
+  "openMoreScreen": "./app/navigation.js",
+  "swipe": "./app/navigation.js",
+  "swipeResetFlags": "./app/navigation.js",
+  "swipeCanStart": "./app/navigation.js",
+  "swipeAbort": "./app/navigation.js",
+  "swipeApplyOffset": "./app/navigation.js",
+  "swipeFinish": "./app/navigation.js",
+  "renderTop": "./app/navigation.js",
+  "selectGroup": "./app/navigation.js",
+  "pickGroupWithFeel": "./app/navigation.js",
+  "openGroupPicker": "./app/navigation.js",
+  "cancelGroupPicker": "./app/navigation.js",
+  "confirmAndLogout": "./app/navigation.js",
+  "sessionPillText": "./app/navigation.js"
  }
 }

@@ -142,7 +142,7 @@ import { UI_FEEL, UI_MOTION, delay, ensureToastWrap, flash, hapticTap, motionOk,
 import { ATT_LABEL, AUDIT_FILTERS, AUDIT_TITLES, BOOT_SPLASH, BOOT_SPLASH_EXIT_MS, BOOT_SPLASH_MIN_MS, DAY_SWAP_MOTION, FACULTY_LABEL, FORMATION_SKIP_SUBJECT, HW_EMPTY_QUIET, HW_TAB_BY_DAY, MAX_NEWS_PHOTOS, MORE_UI_V2, NAV_ICONS, NAV_WITH_ICONS, PROFILE_AVATARS, PROGRAM_KINDS, PULL_TO_REFRESH, READER_EASE, READER_SNAP_MS, ROLE_LABEL, ROLE_RU, STAFF_KIND_LABEL, TAB_ORDER } from './lib/constants.js'
 import { SELECTED_GROUP_KEY, THEME_KEY, WEEK_MAX, applyTheme, splashStartedAt, state } from './lib/app-state.js'
 import { installStepsNode, isAndroidDevice, isIosDevice, isStandaloneApp, renderInstallCard, setInstallHelpOpen, tryNativeInstall } from './lib/install.js'
-import { attachmentImageCandidates, bindFileDownload, bindImgCandidates, closeHwLightbox, collectHwPhotoEntries, isImageMime, looksLikeHwImage, openHwLightbox, renderHwAttachments, safeStorageUrl } from './features/lightbox.js'
+import { attachmentImageCandidates, bindFileDownload, bindImgCandidates, closeHwLightbox, collectHwPhotoEntries, isHwLightboxOpen, isImageMime, looksLikeHwImage, openHwLightbox, renderHwAttachments, safeStorageUrl } from './features/lightbox.js'
 import { dueDateForNextLesson, ensureOverrideDraft, facultyOfGroup, getScheduleNowStatus, groupHasFormation, groupHomeworkByAuthor, hwAuthorKey, isFormationSkipHw, isHwView, isLessonInPerson, lessonMeta, linkifyHwText, loadFormationDay, maybeSeekHwDay, overrideIsActiveForList, paintFormationRows, paintFormationTools, renderAddHwInline, renderAuthorChip, renderDays, renderFormationCard, renderFormationMarksOverlay, renderHwCard, renderHwTab, renderHwToggleAvatar, renderInlineHwGroups, renderLessonCard, renderMonthCalendar, renderNowStrip, renderSchedule, resolveFormation } from './screens/schedule.js'
 import { auditCard, auditGroupName, auditSnapshot, auditTitle, auditWhen, downloadAuditCsv, isAdminSectionOpen, parseAuditDetail, renderAdminFreeRooms, renderAdminPanel, renderAuditSection, renderFormationSettings, renderGroupPicker, renderHomeTextSettings, renderLegalDoc, renderOverrideForm, renderOverridesTab, renderScheduleImport, renderSessionSettings, saveAppSettings, toggleAdminSection, wrapAdminAcc } from './screens/admin.js'
 import { attachCardSwipe, canWriteNews, createReaderShell, formatNewsDate, homeNoLessonsText, homeProgramKind, listFaculties, lockReaderScroll, mountReaderCards, openNewsReader, renderHome, renderHomeHero, renderHomeNow, renderNewsComposer, scrollReaderTo, splitNewsMedia, startHeroAutoSlide, syncComposeToggle, unlockReaderScroll } from './features/news.js'
@@ -151,13 +151,13 @@ import { clearCascadeAnim, loadImageFromFile, moreSettingsRow, moreSvg, moreThem
 import { auditDate, calendarDateForWeekday, canEdit, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, hhmmToMinutes, humanMins, isPageReload, normalizeSuggestKey, nowMinutesOfDay, relativeTime, roleRu, shortPersonName, shortSubjectLabel, stripIds, subtractMinutes, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso } from './lib/time.js'
 import { buildRoomResultsNodes, buildTeacherResultsNodes, renderRoomSearch, renderRoomSlotCard, renderTeacherSearch, renderTeacherSlotCard, renderTeachersTab, resolveFreeRoomsSlotKey, roomLink } from './screens/directory.js'
 import { buildPersistentPager, getPagerTrack, journalCtx, pagerIndex, pagerSetX, pagerSnapToIndex, pagerWidth, paneTabId, readPaneScroll, renderStudyTab, renderTabBody, resetWindowScroll, restorePaneScroll, sizePagerPanes, softUpdateNav, softUpdateTopLead, withTabScrollPreserved } from './app/pager.js'
+import { cancelGroupPicker, confirmAndLogout, gotoTab, openGroupPicker, openMoreScreen, pickGroupWithFeel, refreshTabPanes, renderTop, selectGroup, sessionPillText, swipe, swipeAbort, swipeApplyOffset, swipeCanStart, swipeFinish, swipeResetFlags, switchTab, tabLeadText, tabSwitchShieldUntil } from './app/navigation.js'
 import { wireHub } from './app/hub.js'
 
 // Отдаём вынесенным модулям функции ядра.
 // Список собирается автоматически: берутся ровно те имена, которые модули
 // зовут через hub. Часть объявлена здесь, часть уже живёт в модулях (в импортах).
-wireHub({ auditDate, calendarDateForWeekday, canEdit, confirmAndLogout, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, gotoTab, hhmmToMinutes, homeNoLessonsText, humanMins, initialDataLoading, normalizePeopleQuery, nowMinutesOfDay, openGroupPicker, openImageCropEditor, openMoreScreen, openProgramScreen, pickGroupWithFeel, programsLoaded, refreshTabPanes, render, renderPrograms, resolveFreeRoomsSlotKey, roleRu, roomLink, shortSubjectLabel, softRefreshCurrentTab, softUpdateNav, stripIds, subtractMinutes, switchTab, tabLeadText, tabSwitchShieldUntil, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso, withTabScrollPreserved })
-
+wireHub({ auditDate, calendarDateForWeekday, canEdit, confirmAndLogout, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, gotoTab, hhmmToMinutes, homeNoLessonsText, humanMins, initialDataLoading, isEditingFormNow, normalizePeopleQuery, nowMinutesOfDay, openGroupPicker, openImageCropEditor, openMoreScreen, openProgramScreen, pickGroupWithFeel, programsLoaded, refreshTabPanes, render, renderPrograms, resolveFreeRoomsSlotKey, roleRu, roomLink, shortSubjectLabel, softRefreshCurrentTab, softUpdateNav, stripIds, subtractMinutes, switchTab, tabLeadText, tabSwitchShieldUntil, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso, withTabScrollPreserved })
 
 
 // Внедряем функции из main.js в вынесенный модуль
@@ -171,135 +171,6 @@ function normalizePeopleQuery(s) {
     .replace(/ё/g, 'е')
     .replace(/\s+/g, ' ')
     .trim()
-}
-
-function selectGroup(id) {
-  state.groupId = id
-  state.prevGroupId = ''
-  state.newsIndex = 0
-  // Программы старосты привязаны к группе — при смене группы перечитываем.
-  programsLoaded.clear()
-  localStorage.setItem(SELECTED_GROUP_KEY, id)
-  state.tab = 'schedule'
-  state.cascade = true
-  render({ force: true })
-  refreshNews(id)
-    .then(() => {
-      if (state.groupId !== id) return
-      if (!refreshTabPanes(['home'])) return
-    })
-    .catch(() => {})
-}
-
-function pickGroupWithFeel(id, btn) {
-  hapticTap()
-  if (btn) {
-    btn.classList.add('is-picked')
-    btn.setAttribute('aria-pressed', 'true')
-  }
-  const wait = motionOk() || UI_FEEL ? 160 : 0
-  window.setTimeout(() => selectGroup(id), wait)
-}
-
-function openGroupPicker() {
-  if (state.groupId) state.prevGroupId = state.groupId
-  state.groupId = ''
-  render()
-}
-
-function cancelGroupPicker() {
-  const backId = state.prevGroupId
-  state.prevGroupId = ''
-  if (backId && getGroup(backId)) {
-    state.groupId = backId
-    localStorage.setItem(SELECTED_GROUP_KEY, backId)
-  }
-  render()
-}
-
-function sessionPillText(session) {
-  if (!session) return 'Войти'
-  // Поле метки приходит с сервера и может быть null — на экран это попадать не должно.
-  session = { ...session, label: String(session.label || '').replace(/^null$/i, '').trim() }
-  if (session.role === 'admin') {
-    const who = shortPersonName((session.label || '').trim() || 'Никитос')
-    return `${who} · выйти`
-  }
-  if (session.role === 'student') {
-    const who = shortPersonName((session.label || '').trim() || 'Студент')
-    return `${who} · выйти`
-  }
-  if (session.role === 'curator') {
-    const who = shortPersonName((session.label || '').trim())
-    return who ? `${who} · выйти` : 'Куратор · выйти'
-  }
-  const who = shortPersonName((session.label || '').trim())
-  return who ? `${who} · выйти` : 'Староста · выйти'
-}
-
-async function confirmAndLogout() {
-  if (!confirm('Выйти с этого устройства?\nЧтобы снова править ДЗ и замены, нужен будет код.')) {
-    return false
-  }
-  await logout()
-  flash('Вы вышли')
-  return true
-}
-
-function renderTop(group) {
-  const session = getSession()
-  const sub = tabLeadText(state.tab, group)
-  return el('header', { className: 'topbar' }, [
-    el('div', { className: 'topbar-left' }, [
-      el('div', { className: 'brand', text: `Колледж Чуйкова · ${getSemesterLabel()}` }),
-      el('button', {
-        type: 'button',
-        className: 'group-title-btn',
-        title: 'Сменить группу',
-        onClick: () => openGroupPicker(),
-      }, [el('h1', { text: group ? group.name : 'Группа' })]),
-      el('p', { className: 'topbar-sub', text: sub || '\u00a0' }),
-    ]),
-    session
-      ? el('button', {
-          className: 'session-pill',
-          type: 'button',
-          text: sessionPillText(session),
-          onClick: () => {
-            void confirmAndLogout()
-          },
-        })
-      : el('button', {
-          className: 'session-pill',
-          type: 'button',
-          text: 'Войти',
-          onClick: () => {
-            state.tab = 'more'
-            state.moreScreen = ''
-            state.highlightLogin = true
-            render()
-          },
-        }),
-  ])
-}
-
-/** Подзаголовок под названием группы — один уровень на всех вкладках */
-function tabLeadText(tab, group) {
-  if (tab === 'home') return 'Главная'
-  if (tab === 'schedule') return 'Расписание'
-  if (tab === 'grades') return state.studyMode === 'hw' ? 'Домашнее задание' : 'Журнал и оценки'
-  if (tab === 'more')
-    return state.moreScreen === 'overrides'
-      ? 'Замены'
-      : state.moreScreen === 'group'
-        ? 'Моя группа'
-        : state.moreScreen === 'contacts'
-          ? 'Мои контакты'
-          : 'Профиль и настройки'
-  if (tab === 'teachers') return 'Справочник: преподаватель или аудитория'
-  if (tab === 'hw') return 'Домашнее задание'
-  if (tab === 'overrides') return 'Замены'
-  return ''
 }
 
 /* ── Настройки сайта в админке ─────────────────────────────────────── */
@@ -327,35 +198,10 @@ try {
   /* ignore */
 }
 
-/**
- * Кардинально: все 5 вкладок всегда в DOM (pager).
- * Свайп только двигает transform — ничего не собирается заново.
- */
-let tabSwitchShieldUntil = 0
-
 /* ================= Доп. образование и кружки ================= */
 
 /** Какие разделы уже подтянули данные с сервера в этой сессии. */
 const programsLoaded = new Set()
-
-/** Обновить содержимое вкладок на месте — без уничтожения pager */
-function refreshTabPanes(tabIds, { force = false } = {}) {
-  const group = state.groupId ? getGroup(state.groupId) : null
-  const track = getPagerTrack()
-  if (!track || !group) return false
-  const ids = (tabIds || TAB_ORDER).map(paneTabId)
-  for (const tabId of [...new Set(ids)]) {
-    // Профиль перерисовываем только когда открыт подэкран замен —
-    // иначе фоновое обновление ДЗ сбросит ввод в формах админки.
-    if (!force && tabId === 'more' && state.moreScreen !== 'overrides') continue
-    const pane = track.querySelector(`:scope > .tab-pane[data-tab="${tabId}"]`)
-    if (!pane) continue
-    clearCascadeAnim(pane)
-    pane.replaceChildren(renderTabBody(tabId, group, { cascade: false }))
-  }
-  state.daySwap = null
-  return true
-}
 
 function softRefreshCurrentTab() {
   if (!state.groupId) {
@@ -387,229 +233,6 @@ function redrawAfterData(tabIds = ['hw', 'schedule']) {
   softUpdateNav()
   paintFlashSlot()
   if (isHwView()) maybeSeekHwDay()
-}
-
-function switchTab(id, { animate = false, fromDrag = false } = {}) {
-  if (state.journal) {
-    state.journal = null
-    state.tab = id
-    render({ force: true })
-    return
-  }
-  if (!id || state.tab === id) {
-    // Уже в профиле, но открыт подэкран замен — вернуть корень профиля
-    if (id === 'more' && state.moreScreen) {
-      state.moreScreen = ''
-      if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
-      softUpdateNav()
-      return
-    }
-    // Уже на главной, но открыт раздел допобразования — вернуть ленту
-    if (id === 'home' && homeProgramKind()) {
-      state.moreScreen = ''
-      state.programDraft = null
-      if (!refreshTabPanes(['home'], { force: true })) render({ force: true })
-      softUpdateNav()
-      return
-    }
-    if (fromDrag) softUpdateNav()
-    return
-  }
-  if (!TAB_ORDER.includes(id)) {
-    state.tab = id
-    state.cascade = false
-    render({ force: true })
-    return
-  }
-
-  const track = getPagerTrack()
-  if (!track) {
-    state.tab = id
-    state.cascade = !!(animate && !fromDrag)
-    render({ force: true })
-    return
-  }
-
-  if (id === 'hw' && HW_TAB_BY_DAY) state.hwDaySeek = null
-  // Тап по «Профиль» всегда ведёт в корень профиля, а не в последний подэкран.
-  // Панель при этом надо обновить, иначе останется отрисованный подэкран замен.
-  const leavingProfileScreen = id === 'more' && state.moreScreen !== ''
-  if (id === 'more') state.moreScreen = ''
-  // Ушли с главной — раздел допобразования закрываем, иначе вернёмся в список, а не в ленту.
-  else if (id !== 'home' && homeProgramKind()) state.moreScreen = ''
-  state.tab = id
-  state.cascade = false
-  const i = pagerIndex(id)
-  if (animate && !fromDrag && motionOk()) {
-    const pane = track.querySelector(`:scope > .tab-pane[data-tab="${id}"]`)
-    const inner = pane?.querySelector('.tab-pane-inner')
-    if (inner) {
-      clearCascadeAnim(inner)
-      // Перезапуск CSS-анимации (иначе повторный вход во вкладку может не сыграть)
-      void inner.offsetWidth
-      inner.classList.add('do-cascade')
-      const done = () => inner.classList.remove('do-cascade')
-      inner.addEventListener('animationend', done, { once: true })
-      window.setTimeout(done, 520)
-    }
-  }
-  // Горизонтальный слайд трека только при свайпе; по кнопке — мгновенно + cascade карточек
-  pagerSnapToIndex(i, { animate: false })
-  softUpdateNav()
-  resetWindowScroll()
-  tabSwitchShieldUntil = Date.now() + 4000
-  if (leavingProfileScreen && state.tab === 'more') {
-    const pane = track.querySelector(':scope > .tab-pane[data-tab="more"]')
-    if (pane) {
-      clearCascadeAnim(pane)
-      pane.replaceChildren(renderTabBody('more', getGroup(state.groupId), { cascade: false }))
-      pane.scrollTop = 0
-    }
-  }
-}
-
-/**
- * Перейти на вкладку и перерисовать её содержимое.
- * Панели pager живут постоянно, поэтому одного switchTab мало:
- * без перерисовки покажется устаревший вариант (например, режим «препод»
- * вместо только что выбранного режима «аудитория»).
- */
-function gotoTab(tabId, { animate = true } = {}) {
-  // Старые id остались в коде переходов: ДЗ теперь внутри «Учёбы», замены — в профиле
-  if (tabId === 'hw') {
-    state.studyMode = 'hw'
-    tabId = 'grades'
-  } else if (tabId === 'overrides') {
-    state.moreScreen = 'overrides'
-    tabId = 'more'
-  }
-  if (!tabId || !TAB_ORDER.includes(tabId)) return
-  const force = tabId === 'more'
-  if (state.tab === tabId) {
-    if (!refreshTabPanes([tabId], { force })) render({ force: true })
-    softUpdateNav()
-    return
-  }
-  switchTab(tabId, { animate })
-  refreshTabPanes([tabId], { force })
-}
-
-/**
- * Открыть конкретный подэкран профиля (замены, моя группа, допобразование…).
- * switchTab('more') всегда сбрасывает подэкран в корень профиля, поэтому
- * состояние выставляем после переключения и сразу перерисовываем панель.
- */
-function openMoreScreen(screen, { animate = true } = {}) {
-  if (!screen) return
-  if (state.tab === 'more') {
-    state.moreScreen = screen
-    if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
-    softUpdateNav()
-    return
-  }
-  switchTab('more', { animate })
-  state.moreScreen = screen
-  if (!refreshTabPanes(['more'], { force: true })) render({ force: true })
-  softUpdateNav()
-}
-
-const swipe = {
-  x0: 0,
-  y0: 0,
-  t0: 0,
-  x: 0,
-  axis: null,
-  active: false,
-  dragging: false,
-  width: 0,
-  trackDir: 0,
-  baseX: 0,
-  busy: false,
-  fingerId: null,
-}
-
-function swipeResetFlags() {
-  swipe.active = false
-  swipe.dragging = false
-  swipe.axis = null
-  swipe.fingerId = null
-  swipe.x = 0
-}
-
-function swipeCanStart(target) {
-  if (swipe.busy) return false
-  if (hwLightboxEl) return false
-  if (!state.groupId || state.legalDoc) return false
-  if (isEditingFormNow()) return false
-  if (!isSiteEnabled() && getSession()?.role !== 'admin') return false
-  if (!(target instanceof Element)) return true
-  if (target.closest('nav.nav, input, textarea, select, button, a, label, .hw-lightbox, .home-hero, .news-reader')) return false
-  return true
-}
-
-function swipeAbort() {
-  if (swipe.busy) {
-    swipeResetFlags()
-    return
-  }
-  const stage = document.getElementById('tab-stage')
-  const track = getPagerTrack()
-  if (track) {
-    track.style.transition = 'none'
-    pagerSnapToIndex(pagerIndex(), { animate: false })
-  }
-  stage?.classList.remove('tab-swiping')
-  swipe.trackDir = 0
-  swipe.baseX = 0
-  swipe.busy = false
-  swipeResetFlags()
-}
-
-function swipeApplyOffset(dx) {
-  const track = getPagerTrack()
-  if (!track) return
-  const w = swipe.width || pagerWidth()
-  const max = 0
-  const min = -((TAB_ORDER.length - 1) * w)
-  let x = swipe.baseX + dx
-  x = Math.min(max, Math.max(min, x))
-  swipe.x = x - swipe.baseX
-  track.style.transition = 'none'
-  track.style.transform = `translate3d(${x}px,0,0)`
-}
-
-function swipeFinish(commitDir) {
-  const track = getPagerTrack()
-  const stage = document.getElementById('tab-stage')
-  const w = swipe.width || pagerWidth()
-  const i = pagerIndex()
-  if (!track || i < 0) {
-    stage?.classList.remove('tab-swiping')
-    swipe.trackDir = 0
-    swipe.busy = false
-    return
-  }
-
-  let next = i
-  if (commitDir === 1 && i < TAB_ORDER.length - 1) next = i + 1
-  else if (commitDir === -1 && i > 0) next = i - 1
-
-  swipe.busy = true
-  const soft = motionOk()
-  const ms = soft ? 340 : 300
-  pagerSnapToIndex(next, { animate: true })
-
-  window.setTimeout(() => {
-    state.tab = TAB_ORDER[next]
-    state.cascade = false
-    softUpdateNav()
-    resetWindowScroll()
-    tabSwitchShieldUntil = Date.now() + 4000
-    stage?.classList.remove('tab-swiping')
-    swipe.trackDir = 0
-    swipe.baseX = 0
-    swipe.busy = false
-  }, ms)
 }
 
 document.addEventListener(
@@ -1153,7 +776,7 @@ if (PULL_TO_REFRESH && typeof window !== 'undefined' && 'ontouchstart' in window
     if (state.tab !== 'schedule' && !isHwView()) return false
     if (!state.groupId || state.legalDoc) return false
     if (isEditingFormNow()) return false
-    if (hwLightboxEl) return false
+    if (isHwLightboxOpen()) return false
     if (!isSiteEnabled() && getSession()?.role !== 'admin') return false
     const top = window.scrollY || document.documentElement.scrollTop || 0
     if (top > 1) return false
