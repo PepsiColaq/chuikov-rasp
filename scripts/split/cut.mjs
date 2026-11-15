@@ -222,6 +222,7 @@ if (alreadyMoved.length) throw new Error(`Уже вынесены: ${alreadyMove
 // ── что нужно модулю извне
 const localSet = new Set(cfg.names)
 const inject = cfg.inject || {} // имя -> имя сеттера
+const internal = new Set(cfg.internal || []) // переменные, нужные только внутри модуля
 const hubNames = new Set() // имена, которые модуль берёт из моста (app/hub.js)
 const needFromModules = new Map() // module file -> Set(names)
 const needFromLib = new Map() // source -> Set(names)
@@ -269,8 +270,6 @@ function relImport(fromLibSource) {
   if (!rel.startsWith('.')) rel = './' + rel
   return rel
 }
-
-const internal = new Set(cfg.internal || [])
 
 const parts = []
 parts.push(cfg.header || `// ${cfg.file}`)
@@ -414,7 +413,7 @@ const moduleTextFinal = renameInjected(moduleText, inject)
     const n = unwrap(raw)
     if (!n) continue
     for (const used of freeNames(n)) {
-      if (!declared.has(used) && !GLOBALS.has(used)) bad.add(used)
+      if (!declared.has(used) && !GLOBALS.has(used) && !internal.has(used)) bad.add(used)
     }
   }
   if (bad.size) {
