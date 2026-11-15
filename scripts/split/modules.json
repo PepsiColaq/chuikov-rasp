@@ -119,5 +119,27 @@
    "stripIds",
    "roleRu"
   ]
+ },
+ "lightbox": {
+  "file": "features/lightbox.js",
+  "header": "// Полноэкранный просмотр фото из домашки.\n//\n// Отдельный модуль, потому что это самый автономный кусок: он рисует\n// собственный слой поверх страницы, ловит свайпы и закрывается по Esc.\n// Раньше занимал 450 строк посреди main.js.",
+  "names": [
+   "safeStorageUrl",
+   "isImageMime",
+   "attachmentImageCandidates",
+   "bindImgCandidates",
+   "bindFileDownload",
+   "looksLikeHwImage",
+   "collectHwPhotoEntries",
+   "renderHwAttachments",
+   "hwLightboxEl",
+   "hwLightboxKeyHandler",
+   "closeHwLightbox",
+   "openHwLightbox"
+  ],
+  "internal": [
+   "hwLightboxEl",
+   "hwLightboxKeyHandler"
+  ]
  }
 }

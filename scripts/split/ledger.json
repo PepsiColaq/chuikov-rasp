@@ -3,7 +3,8 @@
   "ui": "lib/ui-feedback.js",
   "constants": "lib/constants.js",
   "state": "lib/app-state.js",
-  "install": "lib/install.js"
+  "install": "lib/install.js",
+  "lightbox": "features/lightbox.js"
  },
  "names": {
   "UI_MOTION": "./lib/ui-feedback.js",
@@ -56,6 +57,18 @@
   "setInstallHelpOpen": "./lib/install.js",
   "renderInstallCard": "./lib/install.js",
   "deferredInstallPrompt": "./lib/install.js",
-  "installPromptReady": "./lib/install.js"
+  "installPromptReady": "./lib/install.js",
+  "safeStorageUrl": "./features/lightbox.js",
+  "isImageMime": "./features/lightbox.js",
+  "attachmentImageCandidates": "./features/lightbox.js",
+  "bindImgCandidates": "./features/lightbox.js",
+  "bindFileDownload": "./features/lightbox.js",
+  "looksLikeHwImage": "./features/lightbox.js",
+  "collectHwPhotoEntries": "./features/lightbox.js",
+  "renderHwAttachments": "./features/lightbox.js",
+  "hwLightboxEl": "./features/lightbox.js",
+  "hwLightboxKeyHandler": "./features/lightbox.js",
+  "closeHwLightbox": "./features/lightbox.js",
+  "openHwLightbox": "./features/lightbox.js"
  }
 }
