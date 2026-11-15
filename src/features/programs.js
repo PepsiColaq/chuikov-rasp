@@ -11,11 +11,11 @@ import { attachCardSwipe, createReaderShell, lockReaderScroll, mountReaderCards,
 import { deleteProgram, getPrograms, getSession, moveProgram, refreshPrograms, saveProgram, uploadHomeworkFiles } from '../lib/store.js'
 import { el } from '../lib/security.js'
 import { hub } from '../app/hub.js'
+import { programsLoaded } from '../app/programs-cache.js'
 
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
 const canEdit = (...args) => hub.canEdit(...args)
 const openImageCropEditor = (...args) => hub.openImageCropEditor(...args)
-const programsLoaded = (...args) => hub.programsLoaded(...args)
 const refreshTabPanes = (...args) => hub.refreshTabPanes(...args)
 const render = (...args) => hub.render(...args)
 

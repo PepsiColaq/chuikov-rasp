@@ -15,6 +15,7 @@ import { canUseFreeRooms, clearProfileAvatar, getClosedMessage, getGroup, getLoc
 import { renderStudentsScreen } from '../journal-ui.js'
 import { checkConnectivity } from '../lib/supabase.js'
 import { hub } from '../app/hub.js'
+import { tabSwitchShieldActive } from '../app/tab-shield.js'
 
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
 const canEdit = (...args) => hub.canEdit(...args)
@@ -24,7 +25,6 @@ const gotoTab = (...args) => hub.gotoTab(...args)
 const openGroupPicker = (...args) => hub.openGroupPicker(...args)
 const render = (...args) => hub.render(...args)
 const switchTab = (...args) => hub.switchTab(...args)
-const tabSwitchShieldUntil = (...args) => hub.tabSwitchShieldUntil(...args)
 
 export function moreSvg(kind) {
   const wrap = el('span', { className: 'more-row-ico', 'aria-hidden': 'true' })
@@ -1585,8 +1585,13 @@ export function renderNav() {
   )
 }
 
-export function tabSwitchShieldActive() {
-  return Date.now() < tabSwitchShieldUntil
+/**
+ * Идёт ли сейчас переход между вкладками.
+ * Обёртка оставлена для совместимости: сама проверка живёт в app/tab-shield.js,
+ * потому что переменную и чтение нельзя разносить по разным модулям.
+ */
+export function tabSwitchShieldActiveCompat() {
+  return tabSwitchShieldActive()
 }
 
 export function clearCascadeAnim(root) {

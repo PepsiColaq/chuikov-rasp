@@ -16,6 +16,7 @@ import { DAY_NAMES, DAY_SHORT, breakMinutes } from '../data/seed.js'
 import { canGradeGroup, formationAutofill, getFormationDay, listStudents, setFormationCancelled, setFormationMark } from '../lib/journal.js'
 import { markStampLine, personRest, personSurname, reportStampLine } from '../journal-ui.js'
 import { hub } from '../app/hub.js'
+import { isInitialDataLoading } from '../app/loading-state.js'
 
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
 const calendarDateForWeekday = (...args) => hub.calendarDateForWeekday(...args)
@@ -26,7 +27,6 @@ const facultyFromName = (...args) => hub.facultyFromName(...args)
 const formatDateRu = (...args) => hub.formatDateRu(...args)
 const hhmmToMinutes = (...args) => hub.hhmmToMinutes(...args)
 const humanMins = (...args) => hub.humanMins(...args)
-const initialDataLoading = (...args) => hub.initialDataLoading(...args)
 const nowMinutesOfDay = (...args) => hub.nowMinutesOfDay(...args)
 const refreshTabPanes = (...args) => hub.refreshTabPanes(...args)
 const render = (...args) => hub.render(...args)
@@ -1247,7 +1247,7 @@ export function renderHwTab() {
 
   // Пока реальные ДЗ ещё тянутся с сервера и локально пусто — показываем скелетоны,
   // чтобы контент не «прыгал».
-  if (initialDataLoading && isRemoteMode() && !list.length) {
+  if (isInitialDataLoading() && isRemoteMode() && !list.length) {
     const sk = el('div', { className: daySwapPanelClass('panel', { allow: !HW_TAB_BY_DAY }) }, [
       el('p', { className: 'muted', text: `За ${weekRangeLabel().toLowerCase()}` }),
     ])

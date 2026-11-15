@@ -147,17 +147,20 @@ import { dueDateForNextLesson, ensureOverrideDraft, facultyOfGroup, getScheduleN
 import { auditCard, auditGroupName, auditSnapshot, auditTitle, auditWhen, downloadAuditCsv, isAdminSectionOpen, parseAuditDetail, renderAdminFreeRooms, renderAdminPanel, renderAuditSection, renderFormationSettings, renderGroupPicker, renderHomeTextSettings, renderLegalDoc, renderOverrideForm, renderOverridesTab, renderScheduleImport, renderSessionSettings, saveAppSettings, toggleAdminSection, wrapAdminAcc } from './screens/admin.js'
 import { attachCardSwipe, canWriteNews, createReaderShell, formatNewsDate, homeNoLessonsText, homeProgramKind, listFaculties, lockReaderScroll, mountReaderCards, openNewsReader, renderHome, renderHomeHero, renderHomeNow, renderNewsComposer, scrollReaderTo, splitNewsMedia, startHeroAutoSlide, syncComposeToggle, unlockReaderScroll } from './features/news.js'
 import { canManagePrograms, emptyProgramDraft, openProgramReader, programGroupId, programImages, programMetaLine, programVideoSrc, renderProgramEditor, renderPrograms } from './features/programs.js'
-import { clearCascadeAnim, loadImageFromFile, moreSettingsRow, moreSvg, moreThemeIcon, openImageCropEditor, openProgramScreen, paintStaffCard, renderBannedGate, renderCabinetCard, renderClosedGate, renderMore, renderMoreClassic, renderMoreContacts, renderMoreGroup, renderMoreMyCode, renderMoreOverrides, renderMoreStudents, renderMoreSupport, renderMoreV2, renderNav, renderProfileAvatarControls, tabSwitchShieldActive } from './screens/more.js'
+import { clearCascadeAnim, loadImageFromFile, moreSettingsRow, moreSvg, moreThemeIcon, openImageCropEditor, openProgramScreen, paintStaffCard, renderBannedGate, renderCabinetCard, renderClosedGate, renderMore, renderMoreClassic, renderMoreContacts, renderMoreGroup, renderMoreMyCode, renderMoreOverrides, renderMoreStudents, renderMoreSupport, renderMoreV2, renderNav, renderProfileAvatarControls } from './screens/more.js'
 import { auditDate, calendarDateForWeekday, canEdit, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, hhmmToMinutes, humanMins, isPageReload, normalizeSuggestKey, nowMinutesOfDay, relativeTime, roleRu, shortPersonName, shortSubjectLabel, stripIds, subtractMinutes, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso } from './lib/time.js'
 import { buildRoomResultsNodes, buildTeacherResultsNodes, renderRoomSearch, renderRoomSlotCard, renderTeacherSearch, renderTeacherSlotCard, renderTeachersTab, resolveFreeRoomsSlotKey, roomLink } from './screens/directory.js'
 import { buildPersistentPager, getPagerTrack, journalCtx, pagerIndex, pagerSetX, pagerSnapToIndex, pagerWidth, paneTabId, readPaneScroll, renderStudyTab, renderTabBody, resetWindowScroll, restorePaneScroll, sizePagerPanes, softUpdateNav, softUpdateTopLead, withTabScrollPreserved } from './app/pager.js'
-import { cancelGroupPicker, confirmAndLogout, gotoTab, openGroupPicker, openMoreScreen, pickGroupWithFeel, refreshTabPanes, renderTop, selectGroup, sessionPillText, swipe, swipeAbort, swipeApplyOffset, swipeCanStart, swipeFinish, swipeResetFlags, switchTab, tabLeadText, tabSwitchShieldUntil } from './app/navigation.js'
+import { cancelGroupPicker, confirmAndLogout, gotoTab, openGroupPicker, openMoreScreen, pickGroupWithFeel, refreshTabPanes, renderTop, selectGroup, sessionPillText, swipe, swipeAbort, swipeApplyOffset, swipeCanStart, swipeFinish, swipeResetFlags, switchTab, tabLeadText } from './app/navigation.js'
 import { wireHub } from './app/hub.js'
+import { setInitialDataLoading } from './app/loading-state.js'
+import { programsLoaded } from './app/programs-cache.js'
+import { tabSwitchShieldActive } from './app/tab-shield.js'
 
 // Отдаём вынесенным модулям функции ядра.
 // Список собирается автоматически: берутся ровно те имена, которые модули
 // зовут через hub. Часть объявлена здесь, часть уже живёт в модулях (в импортах).
-wireHub({ auditDate, calendarDateForWeekday, canEdit, confirmAndLogout, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, gotoTab, hhmmToMinutes, homeNoLessonsText, humanMins, initialDataLoading, isEditingFormNow, normalizePeopleQuery, nowMinutesOfDay, openGroupPicker, openImageCropEditor, openMoreScreen, openProgramScreen, pickGroupWithFeel, programsLoaded, refreshTabPanes, render, renderPrograms, resolveFreeRoomsSlotKey, roleRu, roomLink, shortSubjectLabel, softRefreshCurrentTab, softUpdateNav, stripIds, subtractMinutes, switchTab, tabLeadText, tabSwitchShieldUntil, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso, withTabScrollPreserved })
+wireHub({ auditDate, calendarDateForWeekday, canEdit, confirmAndLogout, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, gotoTab, hhmmToMinutes, homeNoLessonsText, humanMins, isEditingFormNow, normalizePeopleQuery, nowMinutesOfDay, openGroupPicker, openImageCropEditor, openMoreScreen, openProgramScreen, pickGroupWithFeel, refreshTabPanes, render, renderPrograms, resolveFreeRoomsSlotKey, roleRu, roomLink, shortSubjectLabel, softRefreshCurrentTab, softUpdateNav, stripIds, subtractMinutes, switchTab, tabLeadText, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso, withTabScrollPreserved })
 
 
 // Внедряем функции из main.js в вынесенный модуль
@@ -190,8 +193,6 @@ function normalizePeopleQuery(s) {
    показывается человеческой фразой, а не сырой строкой из базы. */
 
 /** true, пока с Supabase не подтянулись реальные ДЗ (для скелетонов) */
-let initialDataLoading = true
-
 try {
   document.documentElement.classList.toggle('ui-motion', UI_MOTION)
 } catch {
@@ -201,8 +202,6 @@ try {
 /* ================= Доп. образование и кружки ================= */
 
 /** Какие разделы уже подтянули данные с сервера в этой сессии. */
-const programsLoaded = new Set()
-
 function softRefreshCurrentTab() {
   if (!state.groupId) {
     render({ force: true })
@@ -616,7 +615,7 @@ async function boot() {
     .then(() => ensureGroupSelected())
     .catch(() => {})
     .finally(() => {
-      initialDataLoading = false
+      setInitialDataLoading(false)
     })
 
   if (showSplash) {

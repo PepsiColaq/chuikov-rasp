@@ -15,10 +15,11 @@ import { getGroup, getSemesterLabel, getSession, isSiteEnabled, logout, refreshN
 import { isHwLightboxOpen } from '../features/lightbox.js'
 import { el } from '../lib/security.js'
 import { hub } from './hub.js'
+import { programsLoaded } from './programs-cache.js'
+import { armTabSwitchShield } from './tab-shield.js'
 
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
 const isEditingFormNow = (...args) => hub.isEditingFormNow(...args)
-const programsLoaded = (...args) => hub.programsLoaded(...args)
 const render = (...args) => hub.render(...args)
 
 /** Подзаголовок под названием группы — один уровень на всех вкладках */
@@ -39,12 +40,6 @@ export function tabLeadText(tab, group) {
   if (tab === 'overrides') return 'Замены'
   return ''
 }
-
-/**
- * Кардинально: все 5 вкладок всегда в DOM (pager).
- * Свайп только двигает transform — ничего не собирается заново.
- */
-export let tabSwitchShieldUntil = 0
 
 /** Обновить содержимое вкладок на месте — без уничтожения pager */
 export function refreshTabPanes(tabIds, { force = false } = {}) {
@@ -133,7 +128,7 @@ export function switchTab(id, { animate = false, fromDrag = false } = {}) {
   pagerSnapToIndex(i, { animate: false })
   softUpdateNav()
   resetWindowScroll()
-  tabSwitchShieldUntil = Date.now() + 4000
+  armTabSwitchShield()
   if (leavingProfileScreen && state.tab === 'more') {
     const pane = track.querySelector(':scope > .tab-pane[data-tab="more"]')
     if (pane) {
@@ -280,7 +275,7 @@ export function swipeFinish(commitDir) {
     state.cascade = false
     softUpdateNav()
     resetWindowScroll()
-    tabSwitchShieldUntil = Date.now() + 4000
+    armTabSwitchShield()
     stage?.classList.remove('tab-swiping')
     swipe.trackDir = 0
     swipe.baseX = 0

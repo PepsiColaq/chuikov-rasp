@@ -18,3 +18,8 @@ dist-test
 scratch-*
 scripts/split/preview-*
 src/*.bak
+
+# временные выгрузки тестов
+smoke/*.html
+smoke/*.txt
+smoke/last-run.json
