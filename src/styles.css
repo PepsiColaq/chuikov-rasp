@@ -4045,6 +4045,24 @@ html.ptr-on body {
   object-fit: contain;
 }
 
+/* Фото нажимается: открывается полноэкранный просмотр с зумом.
+   Видно, что это кнопка, а не просто картинка. */
+.news-reader-hero.is-zoomable .news-reader-cover {
+  cursor: zoom-in;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.news-reader-hero.is-zoomable .news-reader-cover:active {
+  transform: scale(0.985);
+  opacity: 0.92;
+}
+
+.news-reader-hero.is-zoomable .news-reader-cover:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
 .news-reader-cover-blank {
   background: linear-gradient(150deg, #23402f, #111a15 72%);
   /* Без фото обложка схлопывалась в ноль, и плашка уезжала под статус-бар. */

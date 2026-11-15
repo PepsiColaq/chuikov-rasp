@@ -9715,143 +9715,6 @@ function splitNewsMedia(attachments) {
   return { photos, videos }
 }
 
-/**
- * Зум фото пальцами прямо в просмотре события.
- *
- * Раньше приблизить можно было только открыв полноэкранную галерею. Здесь
- * жест живёт на самой обложке: два пальца — масштаб, один палец при
- * увеличении — панорама, двойной тап — 2.5×/сброс. Пока масштаб > 1,
- * лента не листается: жест полностью у фото.
- *
- * @returns {{ reset: () => void }}
- */
-function attachPhotoZoom(host, img) {
-  if (!host || !img) return { reset: () => {} }
-  let scale = 1
-  let tx = 0
-  let ty = 0
-  let startDist = 0
-  let startScale = 1
-  let startX = 0
-  let startY = 0
-  let baseX = 0
-  let baseY = 0
-  let pinching = false
-  let panning = false
-  let lastTap = 0
-
-  const MAX = 4
-  const MIN = 1
-  host.classList.add('is-zoomable')
-
-  const apply = () => {
-    img.style.transform = `translate3d(${tx}px,${ty}px,0) scale(${scale})`
-    host.classList.toggle('is-zoomed', scale > 1.01)
-  }
-
-  /** Не даём утащить фото за пределы контейнера. */
-  const clamp = () => {
-    const hw = host.clientWidth
-    const hh = host.clientHeight
-    const maxX = Math.max(0, (hw * (scale - 1)) / 2)
-    const maxY = Math.max(0, (hh * (scale - 1)) / 2)
-    tx = Math.min(maxX, Math.max(-maxX, tx))
-    ty = Math.min(maxY, Math.max(-maxY, ty))
-  }
-
-  const reset = () => {
-    scale = 1
-    tx = 0
-    ty = 0
-    img.style.transition = 'transform 180ms ease'
-    apply()
-    window.setTimeout(() => {
-      img.style.transition = ''
-    }, 200)
-  }
-
-  const distance = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
-
-  const onTouchStart = (e) => {
-    if (e.touches.length === 2) {
-      pinching = true
-      panning = false
-      startDist = distance(e.touches[0], e.touches[1]) || 1
-      startScale = scale
-      img.style.transition = ''
-      // Лента не должна листаться параллельно с зумом.
-      e.stopPropagation()
-      return
-    }
-    if (e.touches.length === 1 && scale > 1.01) {
-      panning = true
-      startX = e.touches[0].clientX
-      startY = e.touches[0].clientY
-      baseX = tx
-      baseY = ty
-      img.style.transition = ''
-    }
-  }
-
-  const onTouchMove = (e) => {
-    if (pinching && e.touches.length === 2) {
-      const d = distance(e.touches[0], e.touches[1]) || 1
-      scale = Math.min(MAX, Math.max(MIN, (d / startDist) * startScale))
-      clamp()
-      apply()
-      e.preventDefault()
-      e.stopPropagation()
-      return
-    }
-    if (panning && e.touches.length === 1 && scale > 1.01) {
-      tx = baseX + (e.touches[0].clientX - startX)
-      ty = baseY + (e.touches[0].clientY - startY)
-      clamp()
-      apply()
-      e.preventDefault()
-      e.stopPropagation()
-    }
-  }
-
-  const onTouchEnd = (e) => {
-    if (e.touches.length === 0) {
-      pinching = false
-      panning = false
-      if (scale < 1.02) reset()
-    }
-  }
-
-  // Двойной тап: приблизить к точке / вернуть как было.
-  const onDoubleTap = (e) => {
-    const now = Date.now()
-    if (now - lastTap < 300) {
-      if (scale > 1.01) {
-        reset()
-      } else {
-        scale = 2.5
-        clamp()
-        img.style.transition = 'transform 180ms ease'
-        apply()
-        window.setTimeout(() => {
-          img.style.transition = ''
-        }, 200)
-      }
-      lastTap = 0
-      e.preventDefault()
-      return
-    }
-    lastTap = now
-  }
-
-  host.addEventListener('touchstart', onTouchStart, { passive: false })
-  host.addEventListener('touchmove', onTouchMove, { passive: false })
-  host.addEventListener('touchend', onTouchEnd, { passive: true })
-  host.addEventListener('touchcancel', onTouchEnd, { passive: true })
-  host.addEventListener('click', onDoubleTap)
-
-  apply()
-  return { reset, isZoomed: () => scale > 1.01 }
-}
 
 /**
  * Блокировка прокрутки фона, пока открыт полноэкранный просмотр.
@@ -9940,8 +9803,30 @@ function openNewsReader(items, startIndex = 0) {
       ]),
     ])
 
-    // Приблизить фото можно прямо здесь, не открывая галерею.
-    if (cover) attachPhotoZoom(hero, coverNode)
+    // Тап по фото — открыть полноэкранный просмотр. Зум двумя пальцами
+    // прямо в ленте убран: он мешал листать и сбивал жест. В просмотре
+    // приближать можно как угодно — как фото в Telegram.
+    if (cover) {
+      hero.classList.add('is-zoomable')
+      coverNode.setAttribute('role', 'button')
+      coverNode.setAttribute('tabindex', '0')
+      coverNode.setAttribute('aria-label', 'Открыть фото на весь экран')
+      const openThisPhoto = (e) => {
+        if (e) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
+        hapticTap()
+        openHwLightbox(
+          photos.map((x) => x.url),
+          0,
+        )
+      }
+      coverNode.addEventListener('click', openThisPhoto)
+      coverNode.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') openThisPhoto(e)
+      })
+    }
 
     const extra = photos.slice(1)
 
@@ -12357,7 +12242,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=155`, { scope: base })
+    .register(`${base}sw.js?v=156`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда
