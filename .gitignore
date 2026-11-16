@@ -26,3 +26,8 @@ smoke/last-run.json
 audit-inputs.txt
 
 tmp*.txt
+
+smoke/live*.txt
+smoke/out-*.txt
+smoke/o-fl.txt
+smoke/rr*.txt
