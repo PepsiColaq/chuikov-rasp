@@ -13,7 +13,7 @@ const BASE = 'https://pepsicolaq.github.io/chuikov-rasp/'
 const tests = process.argv.slice(2)
 const toRun = tests.length ? tests : ['smoke/group-search.mjs', 'smoke/compare-screen.mjs']
 
-const indexHtml = await fetch(BASE).then((r) => r.text())
+const indexHtml = await fetch(BASE, { cache: 'no-store' }).then((r) => r.text())
 const m = indexHtml.match(/assets\/index-[A-Za-z0-9_-]+\.js/)
 if (!m) {
   console.error('❌ В index.html не найден бандл')
