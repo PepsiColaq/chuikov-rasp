@@ -16,6 +16,7 @@ import { searchGroups } from '../lib/group-match.js'
 import { getFormationDay } from '../lib/journal.js'
 import { flash, hapticTap } from '../lib/ui-feedback.js'
 import {
+  canCompareGroups,
   getAppSettings,
   getGroup,
   getLessons,
@@ -342,13 +343,6 @@ function markOtherFormation(groupId, dateStr, formation) {
  * а не в замыканиях: иначе перерисовка его бы стёрла.
  */
 export function renderCompare() {
-  const mine = getGroup(state.groupId)
-  if (!mine) {
-    return el('div', { className: 'panel' }, [
-      el('p', { className: 'muted', text: 'Сначала выбери свою группу — тогда будет с чем сравнивать.' }),
-    ])
-  }
-
   const panel = el('div', { className: 'panel cmp-screen' }, [
     el('button', {
       type: 'button',
@@ -360,6 +354,33 @@ export function renderCompare() {
       },
     }),
   ])
+
+  // Право проверяем на входе: экран не должен показывать сравнение тому,
+  // кому админ его не выдал, даже если состояние подставили вручную.
+  const session = getSession()
+  if (!canCompareGroups(session)) {
+    panel.append(
+      el('div', { className: 'card cmp-empty' }, [
+        el('h3', { text: 'Сравнение не подключено' }),
+        el('p', {
+          className: 'muted',
+          style: 'margin:0',
+          text: session
+            ? 'Эта функция выдаётся по коду. Попроси администратора включить её для тебя — вместе с кодом входа.'
+            : 'Сначала войди по своему коду, потом попроси администратора выдать доступ к сравнению.',
+        }),
+      ]),
+    )
+    return panel
+  }
+
+  const mine = getGroup(state.groupId)
+  if (!mine) {
+    panel.append(
+      el('p', { className: 'muted', text: 'Сначала выбери свою группу — тогда будет с чем сравнивать.' }),
+    )
+    return panel
+  }
 
   const other = state.compareGroupId ? getGroup(state.compareGroupId) : null
   panel.append(renderPairCard(mine, other))

@@ -9,7 +9,7 @@ import { ensureOverrideDraft, overrideIsActiveForList } from './schedule.js'
 import { flash, motionOk, showToast } from '../lib/ui-feedback.js'
 import { ATT_LABEL, AUDIT_FILTERS, AUDIT_TITLES } from '../lib/constants.js'
 import { el } from '../lib/security.js'
-import { ALL_GROUPS_ID, addStarostaCode, banStarostaCode, cleanupOldData, clearOverride, createGroup, deactivateGroup, deleteAllSupportTickets, deleteSessionBatch, deleteSupportTicket, fetchAuditLog, fetchSiteStats, fetchSupportTickets, findFreeRooms, getAppSettings, getDb, getGroup, getLessons, getSession, getSessionInfo, importSessionLessons, isSiteEnabled, listDayPairSlots, listGroups, listStarostaCodes, renameStarostaLabel, replySupportTicket, resetSemester, revokeStarostaCode, setAdminDisplayName, setAppSettings, setCodeFreeRooms, setOverride, setSiteEnabled, setStarostaRoleTitle, unbanStarostaCode, undoAudit } from '../lib/store.js'
+import { ALL_GROUPS_ID, addStarostaCode, banStarostaCode, cleanupOldData, clearOverride, createGroup, deactivateGroup, deleteAllSupportTickets, deleteSessionBatch, deleteSupportTicket, fetchAuditLog, fetchSiteStats, fetchSupportTickets, findFreeRooms, getAppSettings, getDb, getGroup, getLessons, getSession, getSessionInfo, importSessionLessons, isSiteEnabled, listDayPairSlots, listGroups, listStarostaCodes, renameStarostaLabel, replySupportTicket, resetSemester, revokeStarostaCode, setAdminDisplayName, setAppSettings, setCodeCompareGroups, setCodeFreeRooms, setOverride, setSiteEnabled, setStarostaRoleTitle, unbanStarostaCode, undoAudit } from '../lib/store.js'
 import { DAY_NAMES } from '../data/seed.js'
 import { searchGroups } from '../lib/group-match.js'
 import { groupByDate, parseScheduleBook, resolveShift } from '../lib/schedule-import.js'
@@ -1157,6 +1157,86 @@ export function renderAdminPanel() {
     paintAccess()
   } else {
     box.append(wrapAdminAcc('roomsAccess', 'Доступ к аудиториям', null))
+  }
+
+  // —— Кому выдать сравнение групп (отдельное право, как аудитории)
+  if (isAdminSectionOpen('compareAccess')) {
+    const cmpBody = el('div', { className: 'admin-people-tools' })
+    const cmpSearch = el('input', {
+      type: 'search',
+      placeholder: 'Поиск по имени…',
+      value: state.compareAccessQuery || '',
+      autocomplete: 'off',
+    })
+    const cmpList = el('div', { className: 'admin-people-list' })
+    const paintCmp = async () => {
+      state.compareAccessQuery = cmpSearch.value || ''
+      try {
+        const q = normalizePeopleQuery(state.compareAccessQuery)
+        const rows = (await listStarostaCodes()).filter((r) => !r.banned)
+        const filtered = q
+          ? rows.filter((r) => normalizePeopleQuery(r.label).includes(q))
+          : rows
+        const nodes = []
+        if (!filtered.length) {
+          nodes.push(
+            el('p', {
+              className: 'muted',
+              text: q ? 'Никого не нашли по этому имени.' : 'Пока нет выданных кодов.',
+            }),
+          )
+        } else {
+          for (const row of filtered) {
+            const on = !!row.canCompareGroups
+            nodes.push(
+              el('div', { className: `admin-people-card${on ? ' is-on' : ''}` }, [
+                el('div', { className: 'admin-people-meta' }, [
+                  el('strong', { text: (row.label || '').trim() || 'без имени' }),
+                  el('span', {
+                    className: 'muted',
+                    text: `${row.groupName || ''}${row.roleTitle ? ` · ${row.roleTitle}` : ''}`,
+                  }),
+                ]),
+                el('button', {
+                  type: 'button',
+                  className: on ? 'btn secondary' : 'btn',
+                  text: on ? 'Забрать' : 'Выдать',
+                  onClick: async () => {
+                    try {
+                      await setCodeCompareGroups(row.id, !on)
+                      flash(on ? 'Сравнение забрано' : 'Сравнение выдано')
+                      paintCmp()
+                    } catch (err) {
+                      flash(err.message, true)
+                    }
+                  },
+                }),
+              ]),
+            )
+          }
+        }
+        swapKeepScroll(cmpList, nodes)
+      } catch (err) {
+        swapKeepScroll(cmpList, [el('p', { className: 'muted', text: err.message })])
+      }
+    }
+    cmpSearch.addEventListener('input', () => {
+      state.compareAccessQuery = cmpSearch.value || ''
+      paintCmp()
+    })
+    cmpBody.append(
+      el('p', {
+        className: 'muted',
+        style: 'margin:0 0 10px;font-size:13px',
+        text: 'Выбери человека с кодом — у него в профиле появится «Сравнить с группой». Право на аудитории выдаётся отдельно.',
+      }),
+      el('div', { className: 'field' }, [el('label', { text: 'Поиск' }), cmpSearch]),
+      cmpList,
+    )
+    box.append(wrapAdminAcc('compareAccess', 'Доступ к сравнению групп', [cmpBody]))
+    paintCmp()
+  } else {
+    box.append(wrapAdminAcc('compareAccess', 'Доступ к сравнению групп', null))
   }
 
   // —— Баны

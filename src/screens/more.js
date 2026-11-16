@@ -11,7 +11,7 @@ import { flash, hapticTap, motionOk, paintFlashSlot, showToast } from '../lib/ui
 import { isIosDevice, isStandaloneApp, renderInstallCard, setInstallHelpOpen, tryNativeInstall } from '../lib/install.js'
 import { el } from '../lib/security.js'
 import { groupmates, listMyMarks, setMyContacts, setOwnStudentCode, setStudentRole, staffList, staffSet } from '../lib/journal.js'
-import { canUseFreeRooms, clearProfileAvatar, getClosedMessage, getGroup, getLocalBanReason, getSession, isLocalDeviceBanned, isRemoteMode, listGroups, loginWithCode, logout, uploadProfileAvatar } from '../lib/store.js'
+import { canCompareGroups, canUseFreeRooms, clearProfileAvatar, getClosedMessage, getGroup, getLocalBanReason, getSession, isLocalDeviceBanned, isRemoteMode, listGroups, loginWithCode, logout, uploadProfileAvatar } from '../lib/store.js'
 import { renderStudentsScreen } from '../journal-ui.js'
 import { checkConnectivity } from '../lib/supabase.js'
 import { hub } from '../app/hub.js'
@@ -973,17 +973,19 @@ export function renderMoreV2() {
           },
         })
       : null,
-    moreSettingsRow({
-      icon: 'compare',
-      title: 'Сравнить с группой',
-      sub: state.compareGroupId && getGroup(state.compareGroupId)
-        ? `С ${getGroup(state.compareGroupId).name}: перемены и построение`
-        : 'Когда вы пересекаетесь',
-      onClick: () => {
-        state.moreScreen = 'compare'
-        render({ force: true })
-      },
-    }),
+    canCompareGroups(session)
+      ? moreSettingsRow({
+          icon: 'compare',
+          title: 'Сравнить с группой',
+          sub: state.compareGroupId && getGroup(state.compareGroupId)
+            ? `С ${getGroup(state.compareGroupId).name}: перемены и построение`
+            : 'Когда вы пересекаетесь',
+          onClick: () => {
+            state.moreScreen = 'compare'
+            render({ force: true })
+          },
+        })
+      : null,
     moreSettingsRow({
       icon: 'help',
       title: 'Техподдержка',

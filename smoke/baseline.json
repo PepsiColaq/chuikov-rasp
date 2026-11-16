@@ -2,45 +2,45 @@
  "steps": [
   {
    "label": "boot",
-   "len": 14921,
-   "nodes": 261,
-   "buttons": 44,
-   "hash": "15a97cd77a0a1cd3"
+   "len": 14212,
+   "nodes": 249,
+   "buttons": 43,
+   "hash": "9b57c48ea9524a95"
   },
   {
    "label": "tab home",
-   "len": 14921,
-   "nodes": 261,
-   "buttons": 44,
-   "hash": "15a97cd77a0a1cd3"
+   "len": 14212,
+   "nodes": 249,
+   "buttons": 43,
+   "hash": "9b57c48ea9524a95"
   },
   {
    "label": "tab schedule",
-   "len": 14938,
-   "nodes": 261,
-   "buttons": 44,
-   "hash": "3325399b827e16fd"
+   "len": 14229,
+   "nodes": 249,
+   "buttons": 43,
+   "hash": "51bc0065e980ca8a"
   },
   {
    "label": "tab grades",
-   "len": 14954,
-   "nodes": 261,
-   "buttons": 44,
-   "hash": "d34447a89217ca3b"
+   "len": 14245,
+   "nodes": 249,
+   "buttons": 43,
+   "hash": "120a88d74533eef4"
   },
   {
    "label": "tab teachers",
-   "len": 14979,
-   "nodes": 261,
-   "buttons": 44,
-   "hash": "cc2c8910327a120e"
+   "len": 14270,
+   "nodes": 249,
+   "buttons": 43,
+   "hash": "ba28ee9241342ef5"
   },
   {
    "label": "tab more",
-   "len": 14959,
-   "nodes": 261,
-   "buttons": 44,
-   "hash": "243f7179dddeeabd"
+   "len": 14250,
+   "nodes": 249,
+   "buttons": 43,
+   "hash": "268df53a636a13a8"
   },
   {
    "label": "more:students",

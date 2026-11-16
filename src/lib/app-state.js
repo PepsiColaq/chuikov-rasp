@@ -85,6 +85,8 @@ export const state = {
   freeRoomsNow: true,
   /** Поиск в выдаче доступа к аудиториям / банах */
   roomsAccessQuery: '',
+  /** Поиск в выдаче доступа к сравнению групп */
+  compareAccessQuery: '',
   bansQuery: '',
   /** id кода с формой «забанить + причина» */
   adminBanId: '',

@@ -1406,6 +1406,17 @@ function payloadCanFreeRooms(payload, role, fallback = false) {
   )
 }
 
+/** Право на сравнение групп. Админу — всегда. */
+function payloadCanCompareGroups(payload, role, fallback = false) {
+  if (role === 'admin') return true
+  return (
+    payload?.canCompareGroups === true ||
+    payload?.cancomparegroups === true ||
+    payload?.can_compare_groups === true ||
+    !!fallback
+  )
+}
+
 /** Сервер: бан этого браузера (visitor_id). */
 export async function refreshDeviceBanStatus() {
   if (!supabaseConfigured || !supabase) return isLocalDeviceBanned()
@@ -1486,6 +1497,11 @@ export async function validateRemoteSession() {
       groupId: payload.groupId || payload.groupid || s.groupId,
       allGroups: !!allGroups,
       canFreeRooms: payloadCanFreeRooms(payload, payload.role || s.role, s.canFreeRooms),
+      canCompareGroups: payloadCanCompareGroups(
+        payload,
+        payload.role || s.role,
+        s.canCompareGroups,
+      ),
       label: payload.label != null ? sanitizeText(payload.label, 64) : s.label,
       roleTitle:
         payload.roleTitle != null || payload.roletitle != null || payload.role_title != null
@@ -1503,6 +1519,7 @@ export async function validateRemoteSession() {
       next.studentId = next.codeId
       next.allGroups = false
       next.canFreeRooms = false
+      next.canCompareGroups = false
     }
     writeSession(next)
     return next
@@ -1515,6 +1532,19 @@ export function canUseFreeRooms(session = getSession()) {
   if (!session) return false
   if (session.role === 'admin') return true
   return !!session.canFreeRooms
+}
+
+/**
+ * Право открывать сравнение групп.
+ *
+ * Сравнение показывает расписание любой группы, но не личные данные —
+ * поэтому это не «секретная» функция, а просто ограниченная: админ выдаёт
+ * её выборочно, как доступ к свободным аудиториям.
+ */
+export function canCompareGroups(session = getSession()) {
+  if (!session) return false
+  if (session.role === 'admin') return true
+  return !!session.canCompareGroups
 }
 
 /** Сколько секунд ещё нельзя входить (0 — не заблокировано/миграция не применена). */
@@ -1579,6 +1609,7 @@ async function loginAsStudent(clean, who = '') {
     studentId: payload.studentId || payload.studentid || payload.codeId || null,
     allGroups: false,
     canFreeRooms: false,
+    canCompareGroups: false,
     token: payload.token,
     label: sanitizeText(payload.label || '', 64),
     roleTitle: 'Студент',
@@ -1619,6 +1650,7 @@ async function loginAsCurator(clean) {
     groupId: payload.groupId || payload.groupid || null,
     allGroups: !(payload.groupId || payload.groupid),
     canFreeRooms: false,
+    canCompareGroups: payloadCanCompareGroups(payload, 'curator'),
     token: payload.token,
     label: sanitizeText(payload.label || '', 64),
     roleTitle: 'Куратор',
@@ -1709,6 +1741,7 @@ export async function loginWithCode(code, groupIdHint = null, who = '') {
           groupId,
           allGroups,
           canFreeRooms: payloadCanFreeRooms(payload, role),
+          canCompareGroups: payloadCanCompareGroups(payload, role),
           token,
           label,
           roleTitle,
@@ -1748,6 +1781,11 @@ export async function loginWithCode(code, groupIdHint = null, who = '') {
               p.all_groups === true ||
               session.allGroups
             session.canFreeRooms = payloadCanFreeRooms(p, session.role, session.canFreeRooms)
+            session.canCompareGroups = payloadCanCompareGroups(
+              p,
+              session.role,
+              session.canCompareGroups,
+            )
             writeSession(session)
           }
         } catch {
@@ -2511,6 +2549,10 @@ export async function listStarostaCodes() {
         active: r.active !== false,
         canFreeRooms:
           r.canFreeRooms === true || r.canfreerooms === true || r.can_free_rooms === true,
+        canCompareGroups:
+          r.canCompareGroups === true ||
+          r.cancomparegroups === true ||
+          r.can_compare_groups === true,
         banned: r.banned === true,
         banReason: r.banReason || r.banreason || r.ban_reason || '',
       }
@@ -2530,6 +2572,7 @@ export async function listStarostaCodes() {
       createdAt: c.createdAt,
       active: true,
       canFreeRooms: !!c.canFreeRooms,
+      canCompareGroups: !!c.canCompareGroups,
       banned: !!c.banned,
       banReason: c.banReason || '',
     })
@@ -2548,6 +2591,7 @@ export async function listStarostaCodes() {
         createdAt: c.createdAt,
         active: true,
         canFreeRooms: !!c.canFreeRooms,
+        canCompareGroups: !!c.canCompareGroups,
         banned: !!c.banned,
         banReason: c.banReason || '',
       })
@@ -2582,6 +2626,50 @@ export async function setCodeFreeRooms(codeId, enabled) {
       c.canFreeRooms = !!enabled
       saveRaw(db)
       return { id: codeId, canFreeRooms: !!enabled }
+    }
+  }
+  throw new Error('Код не найден')
+}
+
+/**
+ * Выдать/забрать право на сравнение групп.
+ *
+ * Отдельно от свободных аудиторий: это разные права, и человеку можно дать
+ * любое из них по отдельности. Если сервер ещё не знает такой функции —
+ * подсказываем, какой файл выполнить, вместо непонятной ошибки PostgREST.
+ */
+export async function setCodeCompareGroups(codeId, enabled) {
+  const session = getSession()
+  if (!session || session.role !== 'admin') throw new Error('Только админ')
+  if (supabaseConfigured) {
+    if (!session.token) throw new Error('Нет связи с общей базой — обнови страницу и войди снова')
+    const { data, error } = await supabase.rpc('rasp_set_code_compare_groups', {
+      p_token: session.token,
+      p_code_id: codeId,
+      p_enabled: !!enabled,
+    })
+    if (error) {
+      const msg = rpcErrorMessage(error)
+      if (/could not find|does not exist|schema cache/i.test(msg)) {
+        throw new Error('На сервере ещё нет права на сравнение — выполни supabase/compare_groups_access.sql')
+      }
+      throw new Error(msg)
+    }
+    return data
+  }
+  for (const c of db.globalStarostaCodes || []) {
+    if (c.id === codeId && c.active !== false) {
+      c.canCompareGroups = !!enabled
+      saveRaw(db)
+      return { id: codeId, canCompareGroups: !!enabled }
+    }
+  }
+  for (const g of db.groups) {
+    const c = (g.starostaCodes || []).find((x) => x.id === codeId && x.active !== false)
+    if (c) {
+      c.canCompareGroups = !!enabled
+      saveRaw(db)
+      return { id: codeId, canCompareGroups: !!enabled }
     }
   }
   throw new Error('Код не найден')

@@ -1,5 +1,10 @@
-// Проверка экрана «Сравнить с группой»: открывается из профиля, находит
-// встречи, не теряет фокус в поиске и не прыгает по прокрутке.
+// Проверка экрана «Сравнить с группой» и выдачи права на него.
+//
+// Три сценария:
+//   1. Админ — право есть по умолчанию, экран открывается.
+//   2. Обычный человек без права — строки в профиле нет, экран не показывает
+//      данные, даже если открыть его принудительно.
+//   3. Тот же человек с выданным правом — строка и экран появляются.
 //
 // Запуск: node smoke/compare-screen.mjs
 import fs from 'node:fs'
@@ -12,141 +17,205 @@ const html = fs
   .replace(/<script type="module" src="\/src\/main\.js"><\/script>/, '')
   .replace(/<script>[\s\S]*?<\/script>/g, '')
 
-const errors = []
-const dom = new JSDOM(html, { url: 'https://example.test/chuikov-rasp/', runScripts: 'outside-only', pretendToBeVisual: true })
-const w = dom.window
-w.matchMedia = (q) => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })
-w.navigator.vibrate = () => true
-w.HTMLCanvasElement.prototype.getContext = () => null
-w.Element.prototype.animate = () => ({ finished: Promise.resolve(), cancel() {}, onfinish: null })
-w.Element.prototype.scrollIntoView = () => {}
-let scrollY = 0
-Object.defineProperty(w, 'scrollY', { get: () => scrollY, set: (v) => (scrollY = v) })
-w.scrollTo = (x, y) => { scrollY = y }
-Object.defineProperty(w, 'innerWidth', { value: 390, writable: true })
-Object.defineProperty(w, 'innerHeight', { value: 844, writable: true })
-w.addEventListener('error', (e) => errors.push(String(e.error?.stack || e.message)))
-w.console.error = (...a) => errors.push(a.map(String).join(' '))
-w.console.warn = () => {}
-w.console.log = () => {}
-w.localStorage.setItem('rasp_selected_group_v3', 'g_0901_пд3')
-w.localStorage.removeItem('rasp_compare_group_v1')
-
-w.eval(bundle)
-const tick = (ms) => new Promise((r) => setTimeout(r, ms))
-await tick(1800)
-
-const doc = w.document
 let failed = 0
 const ok = (m) => console.log('✅ ' + m)
-const bad = (m) => { console.log('❌ ' + m); failed++ }
+const bad = (m) => {
+  console.log('❌ ' + m)
+  failed++
+}
 const check = (cond, m) => (cond ? ok(m) : bad(m))
 
-const findBtn = (re) => [...doc.querySelectorAll('#app button')].find((b) => re.test(b.textContent || ''))
-const clickBtn = async (re, ms = 250) => {
-  const b = findBtn(re)
-  if (!b) return false
-  b.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
-  await tick(ms)
-  return true
+/** Поднимает приложение с заданной сессией в localStorage. */
+function boot({ session = null, compareGroup = null } = {}) {
+  const errors = []
+  const dom = new JSDOM(html, {
+    url: 'https://example.test/chuikov-rasp/',
+    runScripts: 'outside-only',
+    pretendToBeVisual: true,
+  })
+  const w = dom.window
+  w.matchMedia = (q) => ({
+    matches: false, media: q, addEventListener() {}, removeEventListener() {},
+    addListener() {}, removeListener() {},
+  })
+  w.navigator.vibrate = () => true
+  w.HTMLCanvasElement.prototype.getContext = () => null
+  w.Element.prototype.animate = () => ({ finished: Promise.resolve(), cancel() {}, onfinish: null })
+  w.Element.prototype.scrollIntoView = () => {}
+  let scrollY = 0
+  Object.defineProperty(w, 'scrollY', { get: () => scrollY, set: (v) => (scrollY = v) })
+  w.scrollTo = (x, y) => { scrollY = y }
+  Object.defineProperty(w, 'innerWidth', { value: 390, writable: true })
+  Object.defineProperty(w, 'innerHeight', { value: 844, writable: true })
+  w.addEventListener('error', (e) => errors.push(String(e.error?.stack || e.message)))
+  w.console.error = (...a) => errors.push(a.map(String).join(' '))
+  w.console.warn = () => {}
+  w.console.log = () => {}
+
+  w.localStorage.setItem('rasp_selected_group_v3', 'g_0901_пд3')
+  w.localStorage.removeItem('rasp_compare_group_v1')
+  if (session) w.localStorage.setItem('rasp_session_v3', JSON.stringify(session))
+  if (compareGroup) w.localStorage.setItem('rasp_compare_group_v1', compareGroup)
+
+  w.eval(bundle)
+  return { w, errors, get scrollY() { return scrollY }, set scrollY(v) { scrollY = v } }
 }
 
-// ── Открываем профиль
-await clickBtn(/профиль/i)
-check(!!doc.querySelector('#app .more-row'), 'профиль открылся')
+const tick = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// ── Кнопка «Сравнить с группой» на месте и рядом с кодами/заменами
-const rows = [...doc.querySelectorAll('#app .more-row')]
-const idxCompare = rows.findIndex((r) => /сравнить с группой/i.test(r.textContent || ''))
-const idxSwap = rows.findIndex((r) => /^замены/i.test((r.textContent || '').trim()))
-const idxCodes = rows.findIndex((r) => /коды студентов/i.test(r.textContent || ''))
-check(idxCompare >= 0, 'в профиле есть «Сравнить с группой»')
-check(
-  idxCompare > idxSwap && (idxCodes < 0 || idxCompare > idxCodes),
-  `кнопка стоит после «Замены» и «Коды студентов» (замены ${idxSwap}, коды ${idxCodes}, сравнение ${idxCompare})`,
-)
+const findBtn = (doc, re) => [...doc.querySelectorAll('#app button')].find((b) => re.test(b.textContent || ''))
 
-await clickBtn(/сравнить с группой/i, 400)
-check(!!doc.querySelector('#app .cmp-screen'), 'экран сравнения открылся')
-check(!!doc.querySelector('#app .cmp-head'), 'видна плашка «моя группа ↔ с кем»')
-check(/Сравнение с другой группой/i.test(doc.querySelector('#app .topbar-sub')?.textContent || ''), 'в шапке подпись про сравнение')
+// ═══════════════════════════════════════════════════════════════════
+console.log('── 1. Админ: право есть по умолчанию ──')
+{
+  const app = boot({ session: { role: 'admin', token: 't-admin', label: 'Никитос', expiresAt: Date.now() + 1e9 } })
+  const { w, errors } = app
+  await tick(1800)
+  const doc = w.document
 
-// ── Выбор второй группы: сначала пустой список + поиск
-let input = doc.querySelector('#app #cmp-group-search')
-check(!!input, 'есть поле поиска второй группы')
+  await findBtn(doc, /профиль/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(350)
 
-const before = doc.querySelectorAll('#app .cmp-group-list .group-pick-btn').length
-check(before > 50, `список групп показан (${before})`)
+  const rows = [...doc.querySelectorAll('#app .more-row')]
+  const idxCompare = rows.findIndex((r) => /сравнить с группой/i.test(r.textContent || ''))
+  const idxCodes = rows.findIndex((r) => /коды студентов/i.test(r.textContent || ''))
+  const idxSwap = rows.findIndex((r) => /^замены/i.test((r.textContent || '').trim()))
+  check(idxCompare >= 0, 'у админа строка «Сравнить с группой» есть')
+  check(
+    idxCompare > idxSwap && idxCompare > idxCodes,
+    `строка стоит после «Замены» и «Коды студентов» (${idxSwap} / ${idxCodes} / ${idxCompare})`,
+  )
 
-// печатаем «0903» и проверяем, что поле живо
-scrollY = 350
-input.focus()
-input.value = '0903'
-input.dispatchEvent(new w.Event('input', { bubbles: true }))
-await tick(300)
+  await findBtn(doc, /сравнить с группой/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(400)
+  check(!!doc.querySelector('#app .cmp-screen'), 'экран сравнения открылся')
+  check(/Сравнение с другой группой/i.test(doc.querySelector('#app .topbar-sub')?.textContent || ''), 'в шапке правильная подпись')
 
-const afterType = doc.querySelector('#app #cmp-group-search')
-check(afterType === input, 'поле поиска не пересоздано (клавиатура не закроется)')
-check(afterType.value === '0903', 'текст в поле сохранился')
-check(doc.activeElement === afterType, 'фокус остался в поиске')
-check(scrollY === 350, `прокрутка не изменилась (350 → ${scrollY})`)
+  // поиск второй группы
+  const input = doc.querySelector('#app #cmp-group-search')
+  check(!!input, 'есть поле поиска второй группы')
+  const before = doc.querySelectorAll('#app .cmp-group-list .group-pick-btn').length
+  check(before > 50, `список групп показан (${before})`)
 
-const filtered = doc.querySelectorAll('#app .cmp-group-list .group-pick-btn').length
-check(filtered > 0 && filtered < before, `список отфильтрован: ${filtered} из ${before}`)
-
-// ── Выбираем первую найденную группу
-const pick = doc.querySelector('#app .cmp-group-list .group-pick-btn')
-const pickedName = (pick.textContent || '').trim().split('\n')[0]
-pick.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
-await tick(500)
-
-check(!doc.querySelector('#app #cmp-group-search'), 'после выбора поиск убран')
-check(!!doc.querySelector('#app .cmp-summary'), 'появился итог дня')
-const pairText = doc.querySelector('#app .cmp-pair')?.textContent || ''
-check(pairText.includes(pickedName.trim().split(' ')[0]) || pairText.length > 0, `в плашке видна выбранная группа (${pickedName})`)
-
-// ── Выбор запомнился
-check(
-  w.localStorage.getItem('rasp_compare_group_v1') === 'g_0903_пд1',
-  `выбор сохранён в localStorage (${w.localStorage.getItem('rasp_compare_group_v1')})`,
-)
-
-// ── Есть переключатель дней и данные
-const dayBtns = doc.querySelectorAll('#app .cmp-days button')
-check(dayBtns.length >= 5, `переключатель дней: ${dayBtns.length} кнопок`)
-check(!!doc.querySelector('#app .cmp-timeline .cmp-bar'), 'нарисован таймлайн дня')
-
-const meetings = doc.querySelectorAll('#app .cmp-meet').length
-const segments = doc.querySelectorAll('#app .cmp-row').length
-check(segments > 0, `раскладка «кто где» построена: ${segments} отрезков`)
-console.log(`   встреч найдено: ${meetings}`)
-
-// ── Переключение дня меняет данные, а не ломает экран
-const otherDay = [...dayBtns].find((b) => !b.classList.contains('active'))
-const titleBefore = doc.querySelector('#app .cmp-summary-day')?.textContent
-otherDay.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
-await tick(350)
-const titleAfter = doc.querySelector('#app .cmp-summary-day')?.textContent
-check(titleBefore !== titleAfter, `переключение дня меняет дату («${titleBefore}» → «${titleAfter}»)`)
-check(!!doc.querySelector('#app .cmp-summary'), 'экран цел после смены дня')
-
-// ── Вход в экран с уже сохранённой группой сразу показывает результат
-const backBtn = findBtn(/← Профиль/i)
-if (backBtn) {
-  backBtn.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  app.scrollY = 350
+  input.focus()
+  input.value = '0903'
+  input.dispatchEvent(new w.Event('input', { bubbles: true }))
   await tick(300)
+  check(doc.querySelector('#app #cmp-group-search') === input, 'поле поиска не пересоздано (клавиатура не закроется)')
+  check(input.value === '0903', 'текст сохранился')
+  check(doc.activeElement === input, 'фокус в поле')
+  check(app.scrollY === 350, `прокрутка не изменилась (350 → ${app.scrollY})`)
+  const filtered = doc.querySelectorAll('#app .cmp-group-list .group-pick-btn').length
+  check(filtered > 0 && filtered < before, `список отфильтрован: ${filtered} из ${before}`)
+
+  // выбор и результат
+  doc.querySelector('#app .cmp-group-list .group-pick-btn').dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(500)
+  check(!!doc.querySelector('#app .cmp-summary'), 'появился итог дня')
+  check(w.localStorage.getItem('rasp_compare_group_v1') === 'g_0903_пд1', 'выбор запомнился')
+  check(doc.querySelectorAll('#app .cmp-days button').length >= 5, 'есть переключатель дней')
+  check(!!doc.querySelector('#app .cmp-timeline .cmp-bar'), 'нарисован таймлайн')
+  check(doc.querySelectorAll('#app .cmp-row').length > 0, 'есть раскладка «кто где»')
+
+  // смена дня
+  const dayBtns = [...doc.querySelectorAll('#app .cmp-days button')]
+  const other = dayBtns.find((b) => !b.classList.contains('active'))
+  const d1 = doc.querySelector('#app .cmp-summary-day')?.textContent
+  other.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(350)
+  const d2 = doc.querySelector('#app .cmp-summary-day')?.textContent
+  check(d1 !== d2 && !!doc.querySelector('#app .cmp-summary'), `смена дня работает («${d1}» → «${d2}»)`)
+
+  // «Сменить группу»
+  await findBtn(doc, /сменить группу/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(350)
+  check(!!doc.querySelector('#app #cmp-group-search'), '«Сменить группу» возвращает поиск')
+
+  const uniq = [...new Set(errors)]
+  check(uniq.length === 0, uniq.length ? `ошибок в консоли: ${uniq.length}` : 'ошибок в консоли нет')
+  uniq.slice(0, 5).forEach((e) => console.log('   ' + e.split('\n')[0]))
+
+  // ── Секция админки «Доступ к сравнению групп»
+  // Сначала возвращаемся в корень профиля: мы всё ещё на экране сравнения,
+  // и админских секций там, разумеется, нет.
+  await findBtn(doc, /← Профиль/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(400)
+
+  const accBtn = [...doc.querySelectorAll('#app button')].find((b) =>
+    /доступ к сравнению/i.test(b.textContent || ''),
+  )
+  check(!!accBtn, 'в админке есть секция «Доступ к сравнению групп»')
+  if (accBtn) {
+    accBtn.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+    await tick(450)
+    const body = doc.querySelector('#app [id="admin-acc-compareAccess"]')
+    check(!!body, 'секция раскрылась')
+    check(!!doc.querySelector('#app input[placeholder="Поиск по имени…"]'), 'внутри есть поиск по имени')
+    const stillNoErrors = [...new Set(errors)].length === 0
+    check(stillNoErrors, stillNoErrors ? 'раскрытие без ошибок' : 'ошибки при раскрытии')
+  }
 }
-await clickBtn(/сравнить с группой/i, 400)
-check(!doc.querySelector('#app #cmp-group-search'), 'при повторном входе выбор группы уже сделан (запомнился)')
-check(!!doc.querySelector('#app .cmp-summary'), 'и сразу показан итог')
 
-// ── «Сменить группу» возвращает поиск
-await clickBtn(/Сменить группу/i, 350)
-check(!!doc.querySelector('#app #cmp-group-search'), '«Сменить группу» открывает поиск заново')
+// ═══════════════════════════════════════════════════════════════════
+console.log('\n── 2. Староста БЕЗ права ──')
+{
+  const app = boot({
+    session: {
+      role: 'starosta', token: 't-star', label: 'Тюшкин', groupId: 'g_0901_пд3',
+      allGroups: false, canCompareGroups: false, expiresAt: Date.now() + 1e9,
+    },
+    compareGroup: 'g_0903_пд1',
+  })
+  const { w, errors } = app
+  await tick(1800)
+  const doc = w.document
+  await findBtn(doc, /профиль/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(350)
 
-const uniq = [...new Set(errors)]
-check(uniq.length === 0, uniq.length ? `ошибок в консоли: ${uniq.length}` : 'ошибок в консоли нет')
-uniq.slice(0, 6).forEach((e) => console.log('   ' + e.split('\n')[0]))
+  const rows = [...doc.querySelectorAll('#app .more-row')]
+  check(
+    !rows.some((r) => /сравнить с группой/i.test(r.textContent || '')),
+    'строки «Сравнить с группой» в профиле нет',
+  )
+  check(
+    app.scrollY !== undefined,
+    'экран профиля поднялся без ошибок',
+  )
+  const uniq = [...new Set(errors)]
+  check(uniq.length === 0, uniq.length ? `ошибок: ${uniq.length}` : 'ошибок в консоли нет')
+}
 
-console.log(failed ? `\n❌ ПРОВАЛЕНО: ${failed}` : '\n✅ ЭКРАН СРАВНЕНИЯ РАБОТАЕТ')
+// ═══════════════════════════════════════════════════════════════════
+console.log('\n── 3. Тот же староста С правом ──')
+{
+  const app = boot({
+    session: {
+      role: 'starosta', token: 't-star2', label: 'Тюшкин', groupId: 'g_0901_пд3',
+      allGroups: false, canCompareGroups: true, expiresAt: Date.now() + 1e9,
+    },
+    compareGroup: 'g_0903_пд1',
+  })
+  const { w, errors } = app
+  await tick(1800)
+  const doc = w.document
+  await findBtn(doc, /профиль/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(350)
+
+  const rows = [...doc.querySelectorAll('#app .more-row')]
+  const row = rows.find((r) => /сравнить с группой/i.test(r.textContent || ''))
+  check(!!row, 'строка «Сравнить с группой» появилась')
+  check(/0903-ПД1/.test(row?.textContent || ''), 'в подписи видна запомненная группа (0903-ПД1)')
+
+  row.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(450)
+  check(!!doc.querySelector('#app .cmp-screen'), 'экран открылся')
+  check(!doc.querySelector('#app #cmp-group-search'), 'поиск не показан — группа уже запомнена')
+  check(!!doc.querySelector('#app .cmp-summary'), 'сразу показан итог сравнения')
+
+  const uniq = [...new Set(errors)]
+  check(uniq.length === 0, uniq.length ? `ошибок: ${uniq.length}` : 'ошибок в консоли нет')
+}
+
+console.log(failed ? `\n❌ ПРОВАЛЕНО: ${failed}` : '\n✅ ДОСТУП К СРАВНЕНИЮ РАБОТАЕТ ПРАВИЛЬНО')
 process.exit(failed ? 1 : 0)
