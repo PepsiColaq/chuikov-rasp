@@ -24,3 +24,5 @@ smoke/*.html
 smoke/*.txt
 smoke/last-run.json
 audit-inputs.txt
+
+tmp*.txt
