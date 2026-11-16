@@ -16,6 +16,7 @@ import { renderStudentsScreen } from '../journal-ui.js'
 import { checkConnectivity } from '../lib/supabase.js'
 import { hub } from '../app/hub.js'
 import { tabSwitchShieldActive } from '../app/tab-shield.js'
+import { renderCompare } from './compare.js'
 
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
 const canEdit = (...args) => hub.canEdit(...args)
@@ -44,6 +45,8 @@ export function moreSvg(kind) {
     book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H19v3H6.5A2.5 2.5 0 0 1 4 20.5z"/><path d="M8.5 7.5h6M8.5 11h4"/></svg>',
     club:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v3.3M12 17.2v3.3M3.5 12h3.3M17.2 12h3.3"/></svg>',
+    compare:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><rect x="3" y="4.5" width="7" height="15" rx="2"/><rect x="14" y="4.5" width="7" height="15" rx="2"/><path d="M12 7v10" stroke-dasharray="2 2.4"/></svg>',
     help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.7 1.1c0 1.7-2.3 1.9-2.3 3.6"/><path d="M12 17.3h.01"/></svg>',
     chevron:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>',
@@ -179,6 +182,7 @@ export function renderMore() {
   if (state.moreScreen === 'mycode') return renderMoreMyCode()
   if (state.moreScreen === 'support') return renderMoreSupport()
   if (state.moreScreen === 'students') return renderMoreStudents()
+  if (state.moreScreen === 'compare') return renderCompare()
   // Доп. образование и кружки живут только на главной — см. renderHome().
   return MORE_UI_V2 ? renderMoreV2() : renderMoreClassic()
 }
@@ -970,6 +974,17 @@ export function renderMoreV2() {
         })
       : null,
     moreSettingsRow({
+      icon: 'compare',
+      title: 'Сравнить с группой',
+      sub: state.compareGroupId && getGroup(state.compareGroupId)
+        ? `С ${getGroup(state.compareGroupId).name}: перемены и построение`
+        : 'Когда вы пересекаетесь',
+      onClick: () => {
+        state.moreScreen = 'compare'
+        render({ force: true })
+      },
+    }),
+    moreSettingsRow({
       icon: 'help',
       title: 'Техподдержка',
       sub: 'Написать в поддержку',
@@ -1252,6 +1267,23 @@ export function renderMoreClassic() {
         className: 'btn secondary',
         text: group ? `Сейчас: ${group.name}` : 'Выбрать группу',
         onClick: () => openGroupPicker(),
+      }),
+    ]),
+    el('div', { className: 'card' }, [
+      el('h3', { text: 'Сравнить с группой' }),
+      el('p', {
+        className: 'muted',
+        style: 'margin:0 0 10px',
+        text: 'Общие перемены, построение и пары в одном кабинете с другой группой.',
+      }),
+      el('button', {
+        type: 'button',
+        className: 'btn secondary',
+        text: 'Открыть сравнение',
+        onClick: () => {
+          state.moreScreen = 'compare'
+          render({ force: true })
+        },
       }),
     ]),
     el('div', { className: 'card' }, [

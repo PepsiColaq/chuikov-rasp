@@ -428,3 +428,427 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--muted) 14%, transparent);
 }
+
+/* ── Сравнение двух групп: «когда мы пересечёмся» ────────────────────────
+   Три типа встреч получают три цвета, но все — из существующей палитры:
+   синий (акцент) — кабинет, зелёный — перемена, янтарный — построение.
+   Никаких новых значений в палитру не добавляем: иначе тёмная тема
+   разъедется с остальным сайтом. */
+
+.cmp-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cmp-head h3 {
+  margin: 0 0 4px;
+}
+
+/* Пара «моя группа ↔ другая» */
+.cmp-pair {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.cmp-pair-side {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+}
+
+.cmp-pair-side.is-other {
+  background: transparent;
+  border-color: var(--line);
+}
+
+.cmp-pair-role {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cmp-pair-side strong {
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmp-pair-x {
+  align-self: center;
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.cmp-change {
+  margin-top: 10px;
+  width: 100%;
+}
+
+/* Выбор второй группы */
+.cmp-picker .search {
+  margin-bottom: 10px;
+}
+
+.cmp-group-list {
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cmp-empty-hint {
+  margin: 8px 0;
+}
+
+/* День недели */
+.cmp-day-card {
+  padding: 4px 0;
+}
+
+.cmp-days {
+  justify-content: space-between;
+  padding: 6px 10px;
+}
+
+.cmp-days button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 9px 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Итог дня */
+.cmp-summary {
+  border-left: 3px solid var(--line);
+}
+
+.cmp-summary.is-yes {
+  border-left-color: var(--ok);
+}
+
+.cmp-summary-day {
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.cmp-summary-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.cmp-summary-count {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.cmp-summary-count strong {
+  font-size: 17px;
+  color: var(--ink);
+}
+
+.cmp-summary-detail {
+  margin: 6px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cmp-summary-meta {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* Таймлайн дня */
+.cmp-timeline {
+  margin-top: 12px;
+}
+
+.cmp-bar {
+  display: flex;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--line);
+  gap: 1px;
+}
+
+.cmp-bar-seg {
+  height: 100%;
+  min-width: 2px;
+}
+
+.cmp-bar-seg.is-break {
+  background: color-mix(in srgb, var(--ok) 62%, transparent);
+}
+
+.cmp-bar-seg.is-room {
+  background: var(--accent);
+}
+
+.cmp-bar-seg.is-formation {
+  background: var(--warn);
+}
+
+.cmp-bar-seg.is-class,
+.cmp-bar-seg.is-home,
+.cmp-bar-seg.is-mixed {
+  background: color-mix(in srgb, var(--muted) 34%, transparent);
+}
+
+.cmp-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Список встреч */
+.cmp-meets-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cmp-meets-head h3 {
+  margin: 0;
+}
+
+.cmp-meet-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cmp-meet {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+}
+
+.cmp-meet.is-break {
+  border-left-color: var(--ok);
+}
+
+.cmp-meet.is-room {
+  border-left-color: var(--accent);
+}
+
+.cmp-meet.is-formation {
+  border-left-color: var(--warn);
+}
+
+.cmp-meet-num {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-meet-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cmp-meet-main strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-meet-sub {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.cmp-meet-len {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+
+/* Легенда */
+.cmp-legend {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.cmp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cmp-legend-item::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--muted);
+}
+
+.cmp-legend-item.is-break::before {
+  background: color-mix(in srgb, var(--ok) 72%, transparent);
+}
+
+.cmp-legend-item.is-room::before {
+  background: var(--accent);
+}
+
+.cmp-legend-item.is-formation::before {
+  background: var(--warn);
+}
+
+/* «Кто где» — свёрнуто по умолчанию: подробности нужны не всегда */
+.cmp-fold {
+  border-radius: 12px;
+}
+
+.cmp-fold-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.cmp-fold-head::-webkit-details-marker {
+  display: none;
+}
+
+.cmp-fold-hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.cmp-rows-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 4px;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.cmp-rows {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+}
+
+.cmp-row {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  font-size: 13px;
+}
+
+.cmp-row.is-break {
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
+}
+
+.cmp-row.is-room {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.cmp-row.is-formation {
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+}
+
+.cmp-row-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.cmp-row-who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.cmp-row-room {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Пояснения и пустые состояния */
+.cmp-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cmp-empty h3 {
+  margin: 0 0 4px;
+}
+
+.cmp-empty-hint {
+  font-size: 13px;
+}
+
+.cmp-copy {
+  width: 100%;
+}
+
+@media (max-width: 380px) {
+  .cmp-row {
+    grid-template-columns: 80px 1fr;
+  }
+
+  .cmp-row-room {
+    grid-column: 1 / -1;
+    padding-left: 88px;
+  }
+}

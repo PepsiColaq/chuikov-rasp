@@ -8,6 +8,9 @@
 
 export const SELECTED_GROUP_KEY = 'rasp_selected_group_v3'
 
+/** Вторая группа для сравнения расписаний — запоминается между заходами. */
+export const COMPARE_GROUP_KEY = 'rasp_compare_group_v1'
+
 export const THEME_KEY = 'rasp_theme_v1'
 
 export const WEEK_MAX = 6
@@ -26,6 +29,16 @@ export const state = {
   /** Сдвиг месяца в календаре относительно текущего: 0 — этот, -1 — прошлый */
   calendarMonthOffset: 0,
   groupId: localStorage.getItem(SELECTED_GROUP_KEY) || '',
+  /** Вторая группа для сравнения — тоже переживает перезапуск. */
+  compareGroupId: (() => {
+    try {
+      return localStorage.getItem(COMPARE_GROUP_KEY) || ''
+    } catch {
+      return ''
+    }
+  })(),
+  /** День недели в сравнении групп: 0 — ещё не выбран, берём как в расписании. */
+  compareDay: 0,
   day: ((d) => (d === 0 || d === 6 ? 1 : d))(new Date().getDay()),
   weekOffset: 0,
   prevGroupId: '',
