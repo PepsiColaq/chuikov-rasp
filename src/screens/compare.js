@@ -4,13 +4,24 @@
 // в одном кабинете. Все данные уже лежат в телефоне (store), поэтому экран
 // работает офлайн и не делает ни одного запроса на отрисовку.
 //
+// Главный принцип экрана: рядом с каждым временем видно НЕ «на паре», а
+// конкретный предмет и кабинет обеих групп. Иначе сравнение бесполезно —
+// человек всё равно не понимает, где искать другого.
+//
 // Отмену построения сервер отдаёт только «своим» группам, поэтому чужое
 // построение по умолчанию считается по расписанию — и это на экране
-// подписано честно, без обещаний, которых мы не можем проверить.
+// подписано честно, без обещаний, которые мы не можем проверить.
 
 import { COMPARE_GROUP_KEY, state } from '../lib/app-state.js'
 import { DAY_NAMES, DAY_SHORT } from '../data/seed.js'
-import { compareDays, dayBlocks, minutesToHHMM, planFormation } from '../lib/group-compare.js'
+import {
+  compareDays,
+  dayBlocks,
+  minutesToHHMM,
+  planFormation,
+  scheduleRows,
+  summarizeDays,
+} from '../lib/group-compare.js'
 import { el } from '../lib/security.js'
 import { searchGroups } from '../lib/group-match.js'
 import { getFormationDay } from '../lib/journal.js'
@@ -26,7 +37,7 @@ import {
   listGroups,
   resolveLesson,
 } from '../lib/store.js'
-import { dateForWeekday, formatDateRu, humanMins } from '../lib/time.js'
+import { dateForWeekday, formatDateRu, humanMins, nowMinutesOfDay, todayISO } from '../lib/time.js'
 import { hub } from '../app/hub.js'
 
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
@@ -68,12 +79,11 @@ function dayViews(groupId, dateStr) {
 /** Как состояние называется для человека. */
 const STATE_LABEL = {
   class: 'на паре',
-  home: 'дома (дистант)',
-  formation: 'на построении',
+  home: 'дома',
+  formation: 'построение',
   free: 'свободен',
 }
 
-/** Из чего состоит встреча. */
 const MEETING_LABEL = {
   break: 'перемена',
   formation: 'построение',
@@ -94,27 +104,100 @@ function summaryTitle(result, otherName) {
   if (!result.counts.total) {
     return { title: 'Не пересекаетесь', detail: `С ${otherName} в этот день общих окон нет.`, tone: 'none' }
   }
-  const longest = result.meetings.reduce((best, m) => (m.minutes > (best?.minutes || 0) ? m : best), null)
-  const kinds = []
-  if (result.counts.break) kinds.push(`перемен: ${result.counts.break}`)
-  if (result.counts.room) kinds.push(`общих пар: ${result.counts.room}`)
-  if (result.counts.formation) kinds.push('построение вместе')
+  const breaks = result.meetings.filter((m) => m.kind === 'break')
+  const rooms = result.meetings.filter((m) => m.kind === 'room')
+  const forms = result.meetings.filter((m) => m.kind === 'formation')
 
-  const headline =
-    result.counts.break && longest?.kind === 'break'
-      ? `Самая длинная общая перемена — ${humanMins(longest.minutes)}`
-      : longest?.kind === 'room'
-        ? `Вы даже на одной паре — каб. ${longest.rooms.join('/')}`
-        : longest?.kind === 'formation'
-          ? 'Вы вместе на построении'
-          : kinds.join(' · ')
+  // Самое полезное — самая длинная перемена. Она и должна быть в заголовке.
+  const longestBreak = breaks.reduce((best, m) => (m.minutes > (best?.minutes || 0) ? m : best), null)
 
-  return {
-    title: 'Пересекаетесь',
-    detail: headline,
-    meta: kinds.join(' · '),
-    tone: 'yes',
+  let detail
+  if (longestBreak) {
+    detail = `Самая длинная перемена — ${humanMins(longestBreak.minutes)}, в ${minutesToHHMM(longestBreak.start)}`
+  } else if (rooms.length) {
+    detail = `Вы даже на одной паре — каб. ${rooms[0].rooms.join('/')}`
+  } else if (forms.length) {
+    detail = 'Вы вместе на построении'
+  } else {
+    detail = 'Общих окон в этот день нет'
   }
+
+  const parts = []
+  if (breaks.length) parts.push(`перемен: ${breaks.length}`)
+  if (rooms.length) parts.push(`общих пар: ${rooms.length}`)
+  if (forms.length) parts.push('построение вместе')
+
+  return { title: 'Пересекаетесь', detail, meta: parts.join(' · '), tone: 'yes' }
+}
+
+/**
+ * Меньше этого «прямо сейчас» не считаем окном: если перемены осталось
+ * 2 минуты, бежать через этаж уже поздно.
+ */
+const MIN_NOW_BREAK = 5
+
+/**
+ * «Прямо сейчас» — только для сегодняшнего дня.
+ *
+ * Смысл: когда человек стоит в коридоре, ему не нужно расписание на весь
+ * день. Нужны два ответа: где друг прямо сейчас и сколько ждать до окна.
+ */
+function renderNowForToday(result, mineName, otherName, dateStr) {
+  if (!dateStr || dateStr !== todayISO()) return null
+  if (result.empty) return null
+
+  const now = nowMinutesOfDay()
+  if (now < result.dayStart || now >= result.dayEnd) {
+    return el('div', { className: 'card cmp-now is-over' }, [
+      el('p', { className: 'cmp-now-title', text: 'На сегодня всё' }),
+      el('p', { className: 'muted cmp-now-sub', text: 'Занятия в этот день уже закончились.' }),
+    ])
+  }
+
+  // Текущий отрезок и ближайшее окно встречи
+  const current = result.segments.find((s) => now >= s.start && now < s.end)
+  const next = result.meetings.find((m) => m.start > now)
+
+  const rows = []
+  if (current) {
+    rows.push(
+      el('div', { className: 'cmp-now-line' }, [
+        el('span', { className: 'cmp-now-who', text: 'Ты' }),
+        el('span', { className: 'cmp-now-what', text: groupLine(current.mine) }),
+      ]),
+      el('div', { className: 'cmp-now-line' }, [
+        el('span', { className: 'cmp-now-who', text: otherName.replace(/^\d{4}-/, '') }),
+        el('span', { className: 'cmp-now-what', text: groupLine(current.other) }),
+      ]),
+    )
+  }
+
+  let headline
+  let sub = ''
+  if (current && current.kind === 'break' && current.end - now >= MIN_NOW_BREAK) {
+    headline = 'Вы оба свободны — можно идти друг к другу'
+  } else if (current && current.kind === 'formation') {
+    headline = 'Вы оба на построении'
+  } else if (current && current.kind === 'room') {
+    headline = `Вы оба в кабинете ${current.mine.room}`
+  } else if (next) {
+    headline = `Ближайшее окно — через ${humanMins(next.start - now)}`
+    sub = `${minutesToHHMM(next.start)}–${minutesToHHMM(next.end)} · ${
+      next.kind === 'break' ? 'перемена' : next.kind === 'formation' ? 'построение' : `каб. ${next.rooms.join('/')}`
+    }`
+  } else if (current && current.mine.state === 'class') {
+    headline = 'Сейчас вы на разных парах'
+    sub = 'Общих окон до конца дня больше нет'
+  } else {
+    headline = 'Сейчас общих окон нет'
+  }
+
+  return el('div', { className: 'card cmp-now' }, [
+    el('p', { className: 'cmp-now-kicker', text: 'Сейчас' }),
+    el('p', { className: 'cmp-now-title', text: headline }),
+    sub ? el('p', { className: 'cmp-now-sub', text: sub }) : null,
+    rows.length ? el('div', { className: 'cmp-now-rows' }, rows) : null,
+  ])
 }
 
 /** Текст для отправки другу в мессенджер. */
@@ -156,15 +239,28 @@ function renderTimeline(result) {
   ])
 }
 
+/**
+ * Что у группы в этот отрезок — одной строкой.
+ * «Литература · каб. 413», «Свободен», «Дома (дистант)».
+ */
+function groupLine(detail) {
+  if (detail.state === 'free') return 'Свободен'
+  if (detail.state === 'home') {
+    return detail.subject ? `Дома · ${detail.subject}` : 'Дома (дистант)'
+  }
+  if (detail.state === 'formation') return 'Построение'
+  const room = detail.room ? ` · каб. ${detail.room}` : ''
+  return `${detail.subject || 'Пара'}${room}`
+}
+
 /** Строка встречи: «12:10–13:20 · перемена 70 мин». */
 function renderMeetingRow(m, index) {
   const time = `${minutesToHHMM(m.start)}–${minutesToHHMM(m.end)}`
-  const sub =
-    m.kind === 'break'
-      ? `${MEETING_LABEL.break} · ${humanMins(m.minutes)}`
-      : m.kind === 'formation'
-        ? `${MEETING_LABEL.formation} · ${humanMins(m.minutes)}`
-        : `${MEETING_LABEL.room} · каб. ${m.rooms.join('/')}`
+  let sub
+  if (m.kind === 'break') sub = `${MEETING_LABEL.break} · ${humanMins(m.minutes)}`
+  else if (m.kind === 'formation') sub = `${MEETING_LABEL.formation} · ${humanMins(m.minutes)}`
+  else sub = `${MEETING_LABEL.room} · каб. ${m.rooms.join('/')}`
+
   return el('article', { className: `cmp-meet is-${m.kind}` }, [
     el('span', { className: 'cmp-meet-num', text: String(index + 1) }),
     el('div', { className: 'cmp-meet-main' }, [
@@ -175,29 +271,70 @@ function renderMeetingRow(m, index) {
   ])
 }
 
-/** Подробная раскладка: кто где в каждый отрезок дня. */
-function renderBreakdown(result, mineName, otherName) {
-  const rows = result.segments.map((seg) =>
-    el('div', { className: `cmp-row is-${seg.kind}` }, [
-      el('span', { className: 'cmp-row-time', text: `${minutesToHHMM(seg.start)}–${minutesToHHMM(seg.end)}` }),
-      el('span', { className: 'cmp-row-who' }, [
-        el('span', { className: 'cmp-row-mine', text: STATE_LABEL[seg.a] || seg.a }),
-        el('span', { className: 'cmp-row-other', text: STATE_LABEL[seg.b] || seg.b }),
-      ]),
-      seg.rooms.length ? el('span', { className: 'cmp-row-room', text: `каб. ${seg.rooms.join('/')}` }) : null,
-    ]),
-  )
+/**
+ * Расписание рядом: две колонки с предметами и кабинетами.
+ * Это главный блок экрана — по нему видно, где искать другого.
+ */
+function renderSideBySide(result, mineName, otherName) {
+  const rows = scheduleRows(result)
+  if (!rows.length) return null
 
-  return el('details', { className: 'cmp-fold' }, [
-    el('summary', { className: 'cmp-fold-head' }, [
-      el('span', { text: 'Кто где по времени' }),
-      el('span', { className: 'cmp-fold-hint', text: `${result.segments.length} отрезков` }),
+  const shortName = (n) => String(n || '').replace(/^\d{4}-/, '') || String(n || '')
+
+  // Подсветка берётся ИЗ ТОГО ЖЕ списка встреч, что показан выше.
+  // Иначе получалось: в таблице 4 подсвеченных строки, а в списке 2 —
+  // два разных правила давали два разных ответа на один вопрос.
+  const isMeeting = (seg) =>
+    result.meetings.some((m) => m.start === seg.start && m.end === seg.end && m.kind === seg.kind)
+
+  const body = rows.map((seg) => {
+    const time = `${minutesToHHMM(seg.start)}–${minutesToHHMM(seg.end)}`
+    const meet = isMeeting(seg)
+
+    // Если у группы в этот момент занятия уже закончились — она не «свободна»,
+    // она ушла. Иначе «свободен» в 17:00 выглядит как приглашение подождать.
+    const cellLine = (detail, finished) => {
+      if (finished && detail.state === 'free') return 'Занятия закончились'
+      return groupLine(detail)
+    }
+
+    return el('div', { className: `cmp-pairrow${meet ? ' is-meet' : ''} is-${seg.kind}` }, [
+      el('span', { className: 'cmp-pairrow-time', text: time }),
+      el('span', { className: 'cmp-pairrow-cell' }, [
+        el('span', {
+          className: `cmp-pairrow-sub${seg.mine.state === 'class' ? ' is-class' : ''}${
+            seg.mineFinished && seg.mine.state === 'free' ? ' is-done' : ''
+          }`,
+          text: cellLine(seg.mine, seg.mineFinished),
+        }),
+      ]),
+      el('span', { className: 'cmp-pairrow-cell' }, [
+        el('span', {
+          className: `cmp-pairrow-sub${seg.other.state === 'class' ? ' is-class' : ''}${
+            seg.otherFinished && seg.other.state === 'free' ? ' is-done' : ''
+          }`,
+          text: cellLine(seg.other, seg.otherFinished),
+        }),
+      ]),
+    ])
+  })
+
+  return el('div', { className: 'card cmp-side' }, [
+    el('div', { className: 'cmp-side-head' }, [
+      el('h3', { text: 'Расписание рядом' }),
+      el('span', { className: 'cmp-side-hint', text: 'кабинет виден сразу' }),
     ]),
-    el('div', { className: 'cmp-rows-head' }, [
-      el('span', { text: 'время' }),
-      el('span', { text: `${mineName} · ${otherName}` }),
+    el('div', { className: 'cmp-pairhead' }, [
+      el('span', { className: 'cmp-pairhead-time', text: 'время' }),
+      el('span', { className: 'cmp-pairhead-name', text: shortName(mineName) }),
+      el('span', { className: 'cmp-pairhead-name', text: shortName(otherName) }),
     ]),
-    el('div', { className: 'cmp-rows' }, rows),
+    el('div', { className: 'cmp-pairtable' }, body),
+    el('div', { className: 'cmp-legend' }, [
+      el('span', { className: 'cmp-legend-item is-break', text: 'перемена' }),
+      el('span', { className: 'cmp-legend-item is-formation', text: 'построение' }),
+      el('span', { className: 'cmp-legend-item is-room', text: 'один кабинет' }),
+    ]),
   ])
 }
 
@@ -258,6 +395,7 @@ function pickOtherGroup(group, btn) {
     btn.setAttribute('aria-pressed', 'true')
   }
   state.compareGroupId = group.id
+  state.compareDay = 0
   try {
     localStorage.setItem(COMPARE_GROUP_KEY, group.id)
   } catch {
@@ -295,6 +433,7 @@ function renderPairCard(mine, other) {
         text: 'Сменить группу',
         onClick: () => {
           state.compareGroupId = ''
+          state.compareFormationChecked = ''
           state.compareFormationCancelled = ''
           try {
             localStorage.removeItem(COMPARE_GROUP_KEY)
@@ -396,15 +535,7 @@ export function renderCompare() {
     return panel
   }
 
-  // ── День и данные
-  const day = resolveCompareDay()
-  const dateStr = dateForWeekday(day, 0)
-  const days = daysForPair(mine.id, other.id)
-  if (!days.includes(day)) days.push(day)
-
-  const viewsMine = dayViews(mine.id, dateStr)
-  const viewsOther = dayViews(other.id, dateStr)
-
+  // ── Настройки расписания
   const settings = getAppSettings()
   const formationOpts = (group) => ({
     groupName: group?.name || '',
@@ -412,8 +543,40 @@ export function renderCompare() {
     faculties: settings.formationFaculties || [],
     lead: settings.formationAutofillMinutes,
   })
-  const formationMine = planFormation(viewsMine, formationOpts(mine))
-  const formationOther = planFormation(viewsOther, formationOpts(other))
+
+  const day = resolveCompareDay()
+  const dateStr = dateForWeekday(day, 0)
+  const days = daysForPair(mine.id, other.id)
+  if (!days.includes(day)) days.push(day)
+
+  // Данные по всем дням сразу: нужно, чтобы на кнопках дней было видно,
+  // где вообще есть встречи — иначе приходится щёлкать все пять подряд.
+  const perDay = days.map((d) => {
+    const ds = dateForWeekday(d, 0)
+    const vMine = dayViews(mine.id, ds)
+    const vOther = dayViews(other.id, ds)
+    const fMine = planFormation(vMine, formationOpts(mine))
+    const fOther = planFormation(vOther, formationOpts(other))
+    return {
+      day: d,
+      dateStr: ds,
+      vMine,
+      vOther,
+      fMine,
+      fOther,
+      mine: { blocks: dayBlocks(vMine, fMine) },
+      other: { blocks: dayBlocks(vOther, fOther) },
+    }
+  })
+  const daySummary = new Map(
+    summarizeDays(perDay.map((p) => ({ day: p.day, mine: p.mine, other: p.other }))).map((s) => [s.day, s]),
+  )
+
+  const current = perDay.find((p) => p.day === day) || perDay[0]
+  const viewsMine = current.vMine
+  const viewsOther = current.vOther
+  const formationMine = current.fMine
+  const formationOther = current.fOther
 
   // Своё построение: отмену знаем из state.formationDay (её грузит расписание).
   if (formationMine.show && state.formationDay?.cancelled) formationMine.skipped = true
@@ -424,32 +587,40 @@ export function renderCompare() {
     other: { blocks: dayBlocks(viewsOther, formationOther) },
   })
 
-  // ── Переключатель дня
+  // ── Переключатель дня: точка = есть встречи
   panel.append(
     el('div', { className: 'card cmp-day-card' }, [
       el(
         'div',
         { className: 'days cmp-days', role: 'tablist', 'aria-label': 'День недели' },
-        days.map((d) =>
-          el('button', {
+        days.map((d) => {
+          const s = daySummary.get(d)
+          const btn = el('button', {
             type: 'button',
             role: 'tab',
             className: d === day ? 'active' : '',
             'aria-selected': d === day ? 'true' : 'false',
-            text: DAY_SHORT[d],
+            title: s?.total ? `встреч: ${s.total}` : 'встреч нет',
             onClick: () => {
               if (resolveCompareDay() === d) return
               hapticTap()
               state.compareDay = d
               render({ force: true })
             },
-          }),
-        ),
+          }, [
+            el('span', { className: 'cmp-day-label', text: DAY_SHORT[d] }),
+            s?.total
+              ? el('span', { className: 'cmp-day-dot', text: String(s.total) })
+              : el('span', { className: 'cmp-day-dot is-empty', text: '·' }),
+          ])
+          return btn
+        }),
       ),
+      el('p', { className: 'muted cmp-day-hint', text: 'Цифра — сколько у вас общих окон в этот день.' }),
     ]),
   )
 
-  // ── В этот день у кого-то нет пар: честно объясняем причину
+  // ── В этот день у кого-то нет пар
   const noLessonsMine = !viewsMine.length
   const noLessonsOther = !viewsOther.length
   if (noLessonsMine || noLessonsOther) {
@@ -484,6 +655,10 @@ export function renderCompare() {
     ]),
   )
 
+  // ── Сегодня: где мы прямо сейчас и когда ближайшее окно
+  const nowCard = renderNowForToday(result, mine.name, other.name, dateStr)
+  if (nowCard) panel.append(nowCard)
+
   // ── Встречи
   if (result.meetings.length) {
     panel.append(
@@ -505,22 +680,30 @@ export function renderCompare() {
     )
   }
 
-  // ── Подробно
-  panel.append(
-    el('div', { className: 'card cmp-detail' }, [
-      renderBreakdown(result, mine.name, other.name),
+  // ── Главное: расписание рядом с предметами и кабинетами
+  const side = renderSideBySide(result, mine.name, other.name)
+  if (side) panel.append(side)
+
+  // ── Пояснения
+  const notes = []
+  notes.push(
+    el('p', {
+      className: 'muted cmp-note',
+      text: 'Дистанционные пары считаются «дома»: в колледже в это время никого нет.',
+    }),
+  )
+  if (
+    formationOther.show &&
+    state.compareFormationCancelled !== `${other.id}|${dateStr}`
+  ) {
+    notes.push(
       el('p', {
         className: 'muted cmp-note',
-        text: 'Дистанционные пары считаются «дома»: в колледже в это время никого нет.',
+        text: `Построение ${other.name} показано по расписанию: отмену по чужой группе сайт видит, только если ты вошёл.`,
       }),
-      formationOther.show && state.compareFormationCancelled !== `${other.id}|${dateStr}`
-        ? el('p', {
-            className: 'muted cmp-note',
-            text: `Построение ${other.name} показано по расписанию: отмену по чужой группе сайт видит, только если ты вошёл.`,
-          })
-        : null,
-    ]),
-  )
+    )
+  }
+  panel.append(el('div', { className: 'card cmp-detail' }, notes))
 
   // ── Отправить другу
   panel.append(

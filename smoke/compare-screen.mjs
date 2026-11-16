@@ -116,9 +116,27 @@ console.log('── 1. Админ: право есть по умолчанию �
   check(w.localStorage.getItem('rasp_compare_group_v1') === 'g_0903_пд1', 'выбор запомнился')
   check(doc.querySelectorAll('#app .cmp-days button').length >= 5, 'есть переключатель дней')
   check(!!doc.querySelector('#app .cmp-timeline .cmp-bar'), 'нарисован таймлайн')
-  check(doc.querySelectorAll('#app .cmp-row').length > 0, 'есть раскладка «кто где»')
 
-  // смена дня
+  // Таблица «расписание рядом»: должны быть видны предмет и кабинет обеих групп
+  const tableRows = [...doc.querySelectorAll('#app .cmp-pairrow')]
+  check(tableRows.length > 0, `таблица «расписание рядом» построена: ${tableRows.length} строк`)
+  const tableText = tableRows.map((r) => r.textContent || '').join(' ')
+  check(/каб\.\s*\d/.test(tableText), 'в таблице видны номера кабинетов')
+  check(!/на паре/i.test(tableText), 'нет бесполезного «на паре» — вместо него предмет и кабинет')
+
+  // Подсветка в таблице обязана совпадать со списком встреч
+  const listCount = doc.querySelectorAll('#app .cmp-meet').length
+  const markedCount = doc.querySelectorAll('#app .cmp-pairrow.is-meet').length
+  check(
+    markedCount === listCount,
+    `подсвечено ровно столько же строк, сколько встреч в списке (${markedCount} = ${listCount})`,
+  )
+
+  // Метки на днях: цифра = число встреч
+  const dayMarks = [...doc.querySelectorAll('#app .cmp-days .cmp-day-dot')].map((n) => n.textContent.trim())
+  check(dayMarks.length >= 5, `у дней есть метки: ${dayMarks.join(' / ')}`)
+
+  // Смена дня
   const dayBtns = [...doc.querySelectorAll('#app .cmp-days button')]
   const other = dayBtns.find((b) => !b.classList.contains('active'))
   const d1 = doc.querySelector('#app .cmp-summary-day')?.textContent

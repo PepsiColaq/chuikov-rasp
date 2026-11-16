@@ -106,27 +106,33 @@ export function dayBlocks(views, formation) {
   return blocks
 }
 
-/** Что происходит у группы в эту минуту. Построение важнее пары, пара — дистанта. */
-function stateAt(blocks, minute) {
+/**
+ * Что происходит у группы в эту минуту — вместе с подробностями.
+ *
+ * Порядок важности: построение → очная пара → дистант → свободен.
+ * Подробности нужны, чтобы на экране было видно не «на паре», а
+ * «Литература · каб. 413» — иначе сравнение бесполезно.
+ */
+export function detailAt(blocks, minute) {
   let state = 'free'
+  let subject = ''
+  let room = ''
   for (const b of blocks) {
     if (minute < b.start || minute >= b.end) continue
-    if (b.kind === 'formation') return 'formation'
-    if (b.kind === 'class') state = 'class'
-    else if (state !== 'class') state = 'home'
+    if (b.kind === 'formation') {
+      return { state: 'formation', subject: 'Построение', room: '' }
+    }
+    if (b.kind === 'class') {
+      state = 'class'
+      subject = b.subject
+      room = b.room
+    } else if (state !== 'class') {
+      state = 'home'
+      subject = b.subject
+      room = ''
+    }
   }
-  return state
-}
-
-/** Кабинеты, в которых группа в эту минуту. */
-function roomsAt(blocks, minute) {
-  const out = []
-  for (const b of blocks) {
-    if (b.kind !== 'class') continue
-    if (minute < b.start || minute >= b.end) continue
-    if (b.room) out.push(b.room)
-  }
-  return out
+  return { state, subject, room }
 }
 
 /**
@@ -138,12 +144,9 @@ function roomsAt(blocks, minute) {
  * home      — кто-то на дистанте, в колледже его нет
  * mixed     — один свободен, другой занят
  */
-function classify(a, b, roomsA, roomsB) {
+function classify(a, b) {
   if (a === 'formation' && b === 'formation') return 'formation'
-  if (a === 'class' && b === 'class') {
-    const shared = roomsA.some((r) => roomsB.includes(r))
-    return shared ? 'room' : 'class'
-  }
+  if (a === 'class' && b === 'class') return 'pair'
   if (a === 'free' && b === 'free') return 'break'
   if (a === 'home' || b === 'home') return 'home'
   return 'mixed'
@@ -158,7 +161,9 @@ function classify(a, b, roomsA, roomsB) {
  * @returns {{
  *   empty: boolean,
  *   dayStart: number, dayEnd: number,
- *   segments: Array<{start:number,end:number,kind:string,a:string,b:string,rooms:string[]}>,
+ *   segments: Array<{start:number,end:number,kind:string,a:string,b:string,rooms:string[],
+ *                    mine:{state:string,subject:string,room:string},
+ *                    other:{state:string,subject:string,room:string}}>,
  *   meetings: Array<{start:number,end:number,minutes:number,kind:string,rooms:string[]}>,
  *   counts: {break:number, formation:number, room:number, total:number}
  * }}
@@ -211,19 +216,39 @@ export function compareDays({ mine, other, minBreak = MIN_BREAK_MINUTES } = {}) 
     const end = edges[i + 1]
     if (end <= start) continue
     const mid = (start + end) / 2
-    const a = stateAt(aBlocks, mid)
-    const b = stateAt(bBlocks, mid)
-    const kind = classify(a, b, roomsAt(aBlocks, mid), roomsAt(bBlocks, mid))
-    const rooms = roomsAt(aBlocks, mid).filter((r) => roomsAt(bBlocks, mid).includes(r))
+    const mineDetail = detailAt(aBlocks, mid)
+    const otherDetail = detailAt(bBlocks, mid)
+    const sharedRooms =
+      mineDetail.room && otherDetail.room && mineDetail.room === otherDetail.room
+        ? [mineDetail.room]
+        : []
+    const sameRoomPair =
+      mineDetail.state === 'class' &&
+      otherDetail.state === 'class' &&
+      sharedRooms.length > 0
+    const kind = sameRoomPair ? 'room' : classify(mineDetail.state, otherDetail.state)
+
     const prev = segments[segments.length - 1]
     if (prev && prev.kind === kind && prev.end === start) {
       // Склеиваем соседние куски одного типа — иначе перемена 70 мин
       // распалась бы на десяток строк между парами.
       prev.end = end
-      for (const r of rooms) if (!prev.rooms.includes(r)) prev.rooms.push(r)
       continue
     }
-    segments.push({ start, end, kind, a, b, rooms, inside: insideBoth(mid) })
+    segments.push({
+      start,
+      end,
+      kind,
+      a: mineDetail.state,
+      b: otherDetail.state,
+      rooms: sharedRooms,
+      mine: mineDetail,
+      other: otherDetail,
+      // «Занятия закончились» — своё расписание на этот момент уже кончилось.
+      mineFinished: !!spanA && mid >= spanA.end,
+      otherFinished: !!spanB && mid >= spanB.end,
+      inside: insideBoth(mid),
+    })
   }
 
   const meetings = []
@@ -245,4 +270,43 @@ export function compareDays({ mine, other, minBreak = MIN_BREAK_MINUTES } = {}) 
   for (const m of meetings) counts[m.kind] += 1
 
   return { empty: false, dayStart, dayEnd, spanA, spanB, segments, meetings, counts }
+}
+
+/**
+ * Сводка по нескольким дням: где вообще есть встречи.
+ *
+ * Нужна для кнопок дней: сразу видно, в какой день стоит смотреть, а не
+ * щёлкать все пять подряд. Принимает массив `{day, mine, other}`.
+ *
+ * @returns {Array<{day:number, total:number, breakCount:number, roomCount:number,
+ *                  formationCount:number, bestMinutes:number}>}
+ */
+export function summarizeDays(entries) {
+  return (Array.isArray(entries) ? entries : []).map(({ day, mine, other }) => {
+    const r = compareDays({ mine, other })
+    const best = r.meetings.reduce((m, x) => Math.max(m, x.minutes), 0)
+    return {
+      day,
+      total: r.counts.total,
+      breakCount: r.counts.break,
+      roomCount: r.counts.room,
+      formationCount: r.counts.formation,
+      bestMinutes: best,
+    }
+  })
+}
+
+/**
+ * Строки для показа «расписание рядом».
+ *
+ * Отличия от `segments`: выкинуты куски, где оба просто свободны и это не
+ * окно встречи (иначе полдня занимают строки «свободен / свободен»).
+ * Окно встречи и «один свободен» остаются — это как раз полезное.
+ */
+export function scheduleRows(result) {
+  if (!result || result.empty) return []
+  return result.segments.filter((seg) => {
+    if (seg.kind !== 'break' && seg.mine.state === 'free' && seg.other.state === 'free') return false
+    return true
+  })
 }
