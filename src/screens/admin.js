@@ -1942,6 +1942,11 @@ export function renderAdminPanel() {
         className: 'muted',
         text: 'Доп. админ видит эту панель целиком. Коды старост при этом не меняются — их отзывают в разделе «Коды».',
       }),
+      el('p', {
+        className: 'muted',
+        style: 'margin:0 0 10px;font-size:12.5px',
+        text: 'Важно: чтобы код нового админа пускал на сайт, серверная функция входа должна быть свежая. Если админ добавлен, но войти не может — выполни supabase/compare_groups_access.sql в Supabase.',
+      }),
       el('div', { className: 'field' }, [el('label', { text: 'Код' }), adminCode]),
       el('div', { className: 'field' }, [el('label', { text: 'Имя' }), adminLabel]),
       el('div', { className: 'code-card-btns' }, [
@@ -1978,7 +1983,13 @@ export function renderAdminPanel() {
         adminLabel.value = ''
         paintAdmins()
       } catch (err) {
-        flash(err.message, true)
+        const msg = String(err.message || '')
+        // Самая частая причина: старый rasp_login, который не знает про admin_codes.
+        if (/could not find|does not exist|schema cache/i.test(msg)) {
+          flash('Сервер не знает про доп. админов — выполни supabase/compare_groups_access.sql', true)
+        } else {
+          flash(msg, true)
+        }
       }
     })
 

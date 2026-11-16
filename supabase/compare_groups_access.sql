@@ -1,16 +1,15 @@
--- Доступ к сравнению групп: отдельный флаг у кода, как у «Свободных аудиторий».
+-- ВОССТАНОВЛЕНИЕ: вход для доп. админов + право на сравнение групп.
 --
--- Зачем: сравнение расписаний полезно не всем, а выборочно — старосте, куратору,
--- конкретному человеку. Поэтому у каждого кода свой переключатель, а не «всем».
+-- Что случилось раньше: прошлая версия файла заменила rasp_login и rasp_session
+-- на варианты БЕЗ таблицы admin_codes. Поэтому доп. админы (вкладка «Админы»)
+-- получали «Неверный код», хотя их код лежал в базе.
 --
--- Выполни один раз в Supabase → SQL Editor. Можно запускать повторно: всё
--- в idempotent-виде (add column if not exists / create or replace).
+-- Эта версия собрана из roles_v2.sql (полная логика: доп. админы,
+-- повышенные роли студентов, баны, лимиты) и дополнена правом на сравнение.
 --
--- Важно: этот файл полностью повторяет rasp_login и rasp_session. Он должен
--- применяться ПОСЛЕ access_rooms_bans_session.sql — иначе тот перезапишет
--- функции и флаг снова пропадёт из ответа сервера.
+-- Выполни один раз в Supabase → SQL Editor. Можно повторять.
 
--- ── 1. Поле у кода ──────────────────────────────────────────────────────
+-- ── 1. Поле права ───────────────────────────────────────────────────────
 alter table group_codes
   add column if not exists can_compare_groups boolean not null default false;
 
@@ -55,7 +54,7 @@ $$;
 
 grant execute on function public.rasp_set_code_compare_groups(text, text, boolean) to anon, authenticated;
 
--- ── 3. Список кодов: отдаём новый флаг админке ──────────────────────────
+-- ── 3. Список кодов с новым флагом ──────────────────────────────────────
 create or replace function public.rasp_list_starosta_codes(p_token text)
 returns json
 language plpgsql
@@ -99,7 +98,7 @@ $$;
 
 grant execute on function public.rasp_list_starosta_codes(text) to anon, authenticated;
 
--- ── 4. Вход: возвращаем новый флаг ──────────────────────────────────────
+-- ── 4. Вход ─────────────────────────────────────────────────────────────
 drop function if exists public.rasp_login(text, text);
 drop function if exists public.rasp_login(text, text, text);
 
@@ -116,6 +115,8 @@ as $$
 declare
   v_hash text;
   v_admin text;
+  v_admin_name text;
+  v_admin_row public.admin_codes%rowtype;
   v_group_id text;
   v_label text;
   v_role_title text;
@@ -128,9 +129,10 @@ declare
   v_ip text;
   v_ip_bucket text;
   v_code_bucket text;
-  v_admin_name text;
   v_vid text;
   v_dev_ban boolean;
+  v_student_id text;
+  v_student_role text;
 begin
   if p_code is null or length(trim(p_code)) < 8 then
     raise exception 'Код слишком короткий';
@@ -160,10 +162,10 @@ begin
   end if;
 
   select admin_code_hash into v_admin from app_meta where id = 'main';
-  select coalesce(nullif(trim(admin_display_name), ''), 'Никитос') into v_admin_name
+  select coalesce(nullif(trim(admin_display_name), ''), 'Админ') into v_admin_name
     from app_meta where id = 'main';
 
-  -- Админ
+  -- (A) главный админ-код — как раньше
   if v_admin is not null and v_hash = v_admin then
     if v_ip is not null and v_ip <> 'unknown' then
       perform public._login_ok(v_ip_bucket);
@@ -190,7 +192,34 @@ begin
     );
   end if;
 
-  -- Код «на все группы» (куратор) ищется первым
+  -- (B) дополнительный админ — новая ветка, не мешает старой
+  select * into v_admin_row from public.admin_codes
+  where code_hash = v_hash and active limit 1;
+  if v_admin_row.id is not null then
+    if v_ip is not null and v_ip <> 'unknown' then
+      perform public._login_ok(v_ip_bucket);
+    end if;
+    perform public._login_ok(v_code_bucket);
+    v_token := encode(gen_random_bytes(24), 'hex');
+    insert into sessions(token, role, group_id, expires_at, label, code_id, code_hash)
+      values (v_token, 'admin', null, now() + interval '100 years',
+              coalesce(nullif(trim(v_admin_row.label), ''), 'Админ'), v_admin_row.id, v_hash);
+    perform public._write_audit('login_admin_extra', null, left(v_admin_row.label, 64), 'admin');
+    return json_build_object(
+      'role', 'admin',
+      'groupId', null,
+      'allGroups', true,
+      'canFreeRooms', true,
+      'canCompareGroups', true,
+      'token', v_token,
+      'label', coalesce(nullif(trim(v_admin_row.label), ''), 'Админ'),
+      'roleTitle', 'Админ',
+      'codeId', v_admin_row.id
+    );
+  end if;
+
+  -- (C) код старосты группы — как раньше.
+  -- Сначала код «все группы» (у него group_id = null, обычный join его отбросил бы).
   select gc.id, gc.group_id, gc.label, coalesce(gc.role_title, ''), true,
          coalesce(gc.can_free_rooms, false), coalesce(gc.can_compare_groups, false),
          coalesce(gc.banned, false)
@@ -198,10 +227,9 @@ begin
   from group_codes gc
   where gc.code_hash = v_hash
     and gc.active
-    and gc.all_groups
+    and coalesce(gc.all_groups, false)
   limit 1;
 
-  -- Иначе — код конкретной группы
   if v_code_id is null then
     select gc.id, gc.group_id, gc.label, coalesce(gc.role_title, ''), false,
            coalesce(gc.can_free_rooms, false), coalesce(gc.can_compare_groups, false),
@@ -225,8 +253,13 @@ begin
         on conflict (visitor_id) do update
           set active = true, code_id = excluded.code_id, label = excluded.label, created_at = now();
       end if;
-      perform public._write_audit('login_code_ban', case when v_all then null else v_group_id end, left(coalesce(v_label, ''), 64), 'anon');
-      raise exception 'Доступ закрыт. Код заблокирован.';
+      perform public._write_audit(
+        'login_code_banned',
+        case when v_all then null else v_group_id end,
+        left(coalesce(v_label, ''), 64),
+        'anon'
+      );
+      raise exception 'Этот код заблокирован';
     end if;
 
     if v_ip is not null and v_ip <> 'unknown' then
@@ -234,23 +267,16 @@ begin
     end if;
     perform public._login_ok(v_code_bucket);
     v_token := encode(gen_random_bytes(24), 'hex');
-    v_label := left(trim(coalesce(v_label, '')), 64);
-    v_role_title := left(trim(coalesce(v_role_title, '')), 32);
     insert into sessions(token, role, group_id, expires_at, label, code_id, code_hash)
-      values (
-        v_token,
-        'starosta',
-        case when v_all then null else v_group_id end,
-        now() + interval '100 years',
-        v_label,
-        v_code_id,
-        v_hash
-      );
+      values (v_token, 'starosta',
+              case when v_all then null else v_group_id end,
+              now() + interval '100 years',
+              left(coalesce(v_label, ''), 64), v_code_id, v_hash);
     perform public._touch_code_visitor(v_code_id, v_vid);
     perform public._write_audit(
       'login_starosta',
       case when v_all then null else v_group_id end,
-      case when v_all then 'all · ' || v_label else v_label end,
+      case when v_all then 'all · ' || left(coalesce(v_label, ''), 56) else left(coalesce(v_label, ''), 64) end,
       'starosta'
     );
     return json_build_object(
@@ -260,8 +286,8 @@ begin
       'canFreeRooms', coalesce(v_can_rooms, false),
       'canCompareGroups', coalesce(v_can_compare, false),
       'token', v_token,
-      'label', v_label,
-      'roleTitle', v_role_title,
+      'label', left(coalesce(v_label, ''), 64),
+      'roleTitle', left(coalesce(v_role_title, ''), 32),
       'codeId', v_code_id,
       'avatarUrl', coalesce(
         (select nullif(trim(avatar_url), '') from group_codes where id = v_code_id),
@@ -270,18 +296,44 @@ begin
     );
   end if;
 
-  if v_ip is not null and v_ip <> 'unknown' then
-    perform public._login_fail(v_ip_bucket);
+  -- (D) код студента с повышенной ролью — тоже староста
+  select st.id, st.group_id, st.full_name, st.role
+    into v_student_id, v_group_id, v_label, v_student_role
+  from students st
+  where st.code_hash = v_hash and st.active and st.role in ('starosta', 'teacher')
+  limit 1;
+
+  if v_student_id is not null then
+    if v_ip is not null and v_ip <> 'unknown' then
+      perform public._login_ok(v_ip_bucket);
+    end if;
+    perform public._login_ok(v_code_bucket);
+    v_token := encode(gen_random_bytes(24), 'hex');
+    insert into sessions(token, role, group_id, expires_at, label, code_id, code_hash)
+      values (v_token, 'starosta', v_group_id, now() + interval '100 years',
+              left(v_label, 64), v_student_id, v_hash);
+    perform public._write_audit('login_student_starosta', v_group_id, left(v_label, 64), 'starosta');
+    return json_build_object(
+      'role', 'starosta',
+      'groupId', v_group_id,
+      'allGroups', false,
+      'canFreeRooms', false,
+      'token', v_token,
+      'label', left(v_label, 64),
+      'roleTitle', case when v_student_role = 'teacher' then 'Преподаватель' else 'Староста' end,
+      'codeId', v_student_id
+    );
   end if;
-  perform public._login_fail(v_code_bucket);
-  perform public._write_audit('login_fail', p_group_id, 'bad code', 'anon');
+
+  perform public._login_fail(v_ip_bucket, 8, interval '15 minutes');
+  perform public._login_fail(v_code_bucket, 8, interval '15 minutes');
   raise exception 'Неверный код';
 end;
 $$;
 
 grant execute on function public.rasp_login(text, text, text) to anon, authenticated;
 
--- ── 5. Проверка сессии: отдаём новый флаг ───────────────────────────────
+-- ── 5. Проверка сессии ──────────────────────────────────────────────────
 drop function if exists public.rasp_session(text);
 drop function if exists public.rasp_session(text, text);
 
@@ -302,6 +354,7 @@ declare
   v_can_compare boolean := false;
   v_banned boolean := false;
   v_vid text;
+  v_student_role text;
 begin
   if p_token is null then return null; end if;
   select * into s from sessions where token = p_token;
@@ -315,84 +368,89 @@ begin
   v_all := false;
   if s.role = 'starosta' then
     v_ok := false;
+
+    -- (1) код принадлежит студенту с повышенной ролью
     if s.code_id is not null then
-      select exists (
-        select 1 from group_codes gc
-        where gc.id = s.code_id
-          and gc.active
-          and not coalesce(gc.banned, false)
-          and (
-            gc.all_groups
-            or exists (select 1 from groups g where g.id = gc.group_id and g.active)
-          )
-      ),
-      coalesce((select gc.all_groups from group_codes gc where gc.id = s.code_id), false),
-      coalesce((select gc.can_free_rooms from group_codes gc where gc.id = s.code_id), false),
-      coalesce((select gc.can_compare_groups from group_codes gc where gc.id = s.code_id), false),
-      coalesce((select gc.banned from group_codes gc where gc.id = s.code_id), false)
-        into v_ok, v_all, v_can_rooms, v_can_compare, v_banned;
-      if coalesce(v_banned, false) and length(v_vid) >= 8 then
-        insert into device_bans(visitor_id, code_id, label, created_at, active)
-          values (
-            v_vid,
-            s.code_id,
-            left(trim(coalesce(s.label, '')), 64),
-            now(),
-            true
-          )
-        on conflict (visitor_id) do update
-          set active = true, code_id = excluded.code_id, label = excluded.label, created_at = now();
+      select role into v_student_role
+      from public.students
+      where id = s.code_id and active;
+      if coalesce(v_student_role, 'student') in ('starosta', 'teacher') then
+        v_ok := true;
+        v_all := false;
+        v_can_rooms := false;
       end if;
-    elsif s.code_hash is not null and s.code_hash <> '' then
-      select exists (
-        select 1 from group_codes gc
-        where gc.code_hash = s.code_hash
-          and gc.active
-          and not coalesce(gc.banned, false)
-          and (
-            gc.all_groups
-            or exists (select 1 from groups g where g.id = gc.group_id and g.active)
-          )
-      ), coalesce((
-        select gc.all_groups from group_codes gc
-        where gc.code_hash = s.code_hash and gc.active
-        order by gc.all_groups desc limit 1
-      ), false),
-      coalesce((
-        select gc.can_free_rooms from group_codes gc
-        where gc.code_hash = s.code_hash and gc.active
-        order by gc.all_groups desc limit 1
-      ), false),
+    end if;
+
+    -- (2) обычный код старосты группы (прежняя логика)
+    if not v_ok then
+      if s.code_id is not null then
+        select exists (
+          select 1 from group_codes gc
+          where gc.id = s.code_id
+            and gc.active
+            and not coalesce(gc.banned, false)
+            and (
+              gc.all_groups
+              or exists (select 1 from groups g where g.id = gc.group_id and g.active)
+            )
+        ),
+        coalesce((select gc.all_groups from group_codes gc where gc.id = s.code_id), false),
+        coalesce((select gc.can_free_rooms from group_codes gc where gc.id = s.code_id), false),
+        coalesce((select gc.can_compare_groups from group_codes gc where gc.id = s.code_id), false),
+        coalesce((select gc.banned from group_codes gc where gc.id = s.code_id), false)
+          into v_ok, v_all, v_can_rooms, v_can_compare, v_banned;
+        if coalesce(v_banned, false) and length(v_vid) >= 8 then
+          insert into device_bans(visitor_id, code_id, label, created_at, active)
+            values (
+              v_vid,
+              s.code_id,
+              left(trim(coalesce(s.label, '')), 64),
+              now(),
+              true
+            )
+          on conflict (visitor_id) do update
+            set active = true, code_id = excluded.code_id, label = excluded.label, created_at = now();
+        end if;
+      elsif s.code_hash is not null and s.code_hash <> '' then
+        select exists (
+          select 1 from group_codes gc
+          where gc.code_hash = s.code_hash
+            and gc.active
+            and not coalesce(gc.banned, false)
+            and (
+              gc.all_groups
+              or exists (select 1 from groups g where g.id = gc.group_id and g.active)
+            )
+        ), coalesce((
+          select gc.all_groups from group_codes gc
+          where gc.code_hash = s.code_hash and gc.active
+          order by gc.all_groups desc limit 1
+        ), false),
+        coalesce((
+          select gc.can_free_rooms from group_codes gc
+          where gc.code_hash = s.code_hash and gc.active
+          order by gc.all_groups desc limit 1
+        ), false),
       coalesce((
         select gc.can_compare_groups from group_codes gc
         where gc.code_hash = s.code_hash and gc.active
         order by gc.all_groups desc limit 1
       ), false)
-        into v_ok, v_all, v_can_rooms, v_can_compare;
-    else
-      if coalesce(s.label, '') <> '' then
-        select exists (
-          select 1 from group_codes gc
-          join groups g on g.id = gc.group_id
-          where gc.group_id = s.group_id and gc.active and g.active and gc.label = s.label
-            and not coalesce(gc.banned, false)
-        ) into v_ok;
-
-        select
-          coalesce(gc.all_groups, false),
-          coalesce(gc.can_free_rooms, false),
-          coalesce(gc.can_compare_groups, false)
-          into v_all, v_can_rooms, v_can_compare
-        from group_codes gc
-        join groups g on g.id = gc.group_id
-        where gc.group_id = s.group_id and gc.active and g.active and gc.label = s.label
-          and not coalesce(gc.banned, false)
-        order by gc.all_groups desc
-        limit 1;
+          into v_ok, v_all, v_can_rooms, v_can_compare;
       else
-        v_ok := true;
+        if coalesce(s.label, '') <> '' then
+          select exists (
+            select 1 from group_codes gc
+            join groups g on g.id = gc.group_id
+            where gc.group_id = s.group_id and gc.active and g.active and gc.label = s.label
+              and not coalesce(gc.banned, false)
+          ) into v_ok;
+        else
+          v_ok := true;
+        end if;
       end if;
     end if;
+
     if not v_ok then
       delete from sessions where token = p_token;
       return null;
@@ -433,7 +491,7 @@ $$;
 
 grant execute on function public.rasp_session(text, text) to anon, authenticated;
 
--- Продлить уже активные сессии
+-- Продлить активные сессии
 update sessions
 set expires_at = greatest(expires_at, now() + interval '100 years')
 where expires_at > now();
