@@ -49,6 +49,25 @@ window.console.error = (...a) => errors.push('console.error: ' + a.map(String).j
 window.console.warn = () => {}
 window.console.log = () => {}
 
+// Замораживаем часы.
+//
+// Без этого тест нестабилен сам по себе: приложение показывает «перемена
+// 10 мин», через минуту — «перемена 9 мин», и отпечаток DOM меняется,
+// хотя код не менялся. Из-за этого эталон расходился на 10 пунктов
+// даже на заведомо рабочем коде.
+const FIXED_NOW = new Date('2026-11-17T09:30:00+03:00').getTime()
+const RealDate = window.Date
+class FrozenDate extends RealDate {
+  constructor(...args) {
+    if (args.length === 0) super(FIXED_NOW)
+    else super(...args)
+  }
+  static now() {
+    return FIXED_NOW
+  }
+}
+window.Date = FrozenDate
+
 window.localStorage.setItem('rasp_selected_group_v3', 'g_0901_пд3')
 
 try {
@@ -94,7 +113,7 @@ for (let i = 0; i < tabs.length; i++) {
   } catch (e) {
     errors.push(`click tab ${tabs[i]}: ${e.stack || e}`)
   }
-  await tick(250)
+  await tick(600)
   snap('tab ' + tabs[i])
 }
 

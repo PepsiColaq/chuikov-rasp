@@ -2,45 +2,45 @@
  "steps": [
   {
    "label": "boot",
-   "len": 14212,
-   "nodes": 249,
-   "buttons": 43,
-   "hash": "9b57c48ea9524a95"
+   "len": 14550,
+   "nodes": 254,
+   "buttons": 44,
+   "hash": "7376937f3dae164a"
   },
   {
    "label": "tab home",
-   "len": 14212,
-   "nodes": 249,
-   "buttons": 43,
-   "hash": "9b57c48ea9524a95"
+   "len": 14550,
+   "nodes": 254,
+   "buttons": 44,
+   "hash": "7376937f3dae164a"
   },
   {
    "label": "tab schedule",
-   "len": 14229,
-   "nodes": 249,
-   "buttons": 43,
-   "hash": "51bc0065e980ca8a"
+   "len": 14556,
+   "nodes": 254,
+   "buttons": 44,
+   "hash": "5256c9dca4f2bdd0"
   },
   {
    "label": "tab grades",
-   "len": 14245,
-   "nodes": 249,
-   "buttons": 43,
-   "hash": "120a88d74533eef4"
+   "len": 14561,
+   "nodes": 254,
+   "buttons": 44,
+   "hash": "8ab3dea7c300afd7"
   },
   {
    "label": "tab teachers",
-   "len": 14270,
-   "nodes": 249,
-   "buttons": 43,
-   "hash": "ba28ee9241342ef5"
+   "len": 14586,
+   "nodes": 254,
+   "buttons": 44,
+   "hash": "39b07cd19d4d9233"
   },
   {
    "label": "tab more",
-   "len": 14250,
-   "nodes": 249,
-   "buttons": 43,
-   "hash": "268df53a636a13a8"
+   "len": 14566,
+   "nodes": 254,
+   "buttons": 44,
+   "hash": "25a0a889b330bb30"
   },
   {
    "label": "more:students",
@@ -52,31 +52,31 @@
   },
   {
    "label": "more:contacts",
-   "len": 9074,
-   "nodes": 165,
-   "buttons": 34,
-   "hash": "e1436afc34514484"
+   "len": 9412,
+   "nodes": 170,
+   "buttons": 35,
+   "hash": "0183d0f1076823d0"
   },
   {
    "label": "more:overrides",
-   "len": 9081,
-   "nodes": 164,
-   "buttons": 34,
-   "hash": "fedad40b904336dc"
+   "len": 9419,
+   "nodes": 169,
+   "buttons": 35,
+   "hash": "73de1577e5cd14af"
   },
   {
    "label": "more:group",
-   "len": 9074,
-   "nodes": 165,
-   "buttons": 34,
-   "hash": "e1436afc34514484"
+   "len": 9412,
+   "nodes": 170,
+   "buttons": 35,
+   "hash": "0183d0f1076823d0"
   },
   {
    "label": "more:support",
-   "len": 10776,
-   "nodes": 192,
-   "buttons": 35,
-   "hash": "f218686d7e354307"
+   "len": 11114,
+   "nodes": 197,
+   "buttons": 36,
+   "hash": "9d5df3c9af4905e3"
   },
   {
    "label": "after 1 clicks",

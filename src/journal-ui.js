@@ -19,8 +19,27 @@ import {
 } from './lib/journal.js'
 import { DAY_SHORT } from './data/seed.js'
 import { getSession } from './lib/store.js'
+import {
+  ensureGrades,
+  groupGradesByStudent,
+  gradesKey,
+  isSameTapPending,
+  markTapFinished,
+  markTapStarted,
+} from './lib/grade-cache.js'
 
 let journalError = ''
+
+// Оценки: отдельный текст ошибки загрузки (раньше сбой молча превращался
+// в пустой список, и уже выставленные оценки «исчезали» с экрана)
+// плюс кеш — чтобы при сбое показать то, что уже было видно.
+let gradesLoadError = ''
+const gradesCache = new Map()
+
+// Защита от двойного тапа: пока оценка не подтверждена сервером,
+// повторный такой же тап игнорируется. Раньше человек жал «5» несколько раз,
+// потому что на экране ничего не менялось — и в базу летели дубли.
+const gradeTapGuard = new Map()
 
 const ATTS = [
   ['present', '+'],
@@ -634,25 +653,33 @@ function lessonMatchesDate(ctx, lesson, dateStr) {
 
 async function loadJournal(ctx, spec, group, dayLessons, tools, list) {
   try {
-    const [students, marks, grades] = await Promise.all([
+    const [students, marks] = await Promise.all([
       listStudents(spec.groupId),
       listJournalMarks(spec.groupId, spec.date),
-      // Оценки живут в отдельной таблице — их может быть несколько на пару.
-      listLessonGrades(spec.groupId, spec.date, spec.start, spec.end).catch(() => []),
     ])
+
+    // Оценки грузим отдельно: их сбой не должен ломать явку.
+    // Но и молча превращаться в пустоту он тоже не должен — иначе
+    // выставленная оценка «исчезает» с экрана, хотя лежит в базе.
+    const cacheKey = gradesKey(spec.groupId, spec.date, spec.start, spec.end)
+    let grades = gradesCache.get(cacheKey) || []
+    try {
+      grades = await listLessonGrades(spec.groupId, spec.date, spec.start, spec.end)
+      gradesCache.set(cacheKey, grades)
+      gradesLoadError = ''
+    } catch (err) {
+      gradesLoadError = `Оценки этой пары не загрузились (${err.message || 'нет связи'}). Показано то, что было.`
+    }
+
     const mine = marks.filter((m) => m.start === spec.start && m.end === spec.end)
     const byStudent = new Map(mine.map((m) => [m.studentId, m]))
-    const gradesByStudent = new Map()
-    for (const g of grades) {
-      if (!gradesByStudent.has(g.studentId)) gradesByStudent.set(g.studentId, [])
-      gradesByStudent.get(g.studentId).push(g)
-    }
+    const gradesByStudent = groupGradesByStudent(grades)
     const prev = previousLesson(dayLessons, spec.start)
     const ui = { noteId: ctx.state.journalNoteId || '' }
     const reload = () =>
       loadJournal(ctx, ctx.state.journal || spec, group, dayLessons, tools, list)
     paintTools(ctx, spec, group, students, byStudent, prev, marks, tools, list)
-    paintRows(ctx, spec, students, byStudent, gradesByStudent, list, ui, reload)
+    paintRows(ctx, spec, students, byStudent, gradesByStudent, list, ui, reload, cacheKey)
   } catch (err) {
     list.replaceChildren(
       el('p', {
@@ -750,7 +777,7 @@ function paintTools(ctx, spec, group, students, byStudent, prev, allMarks, tools
   )
 }
 
-function paintRows(ctx, spec, students, byStudent, gradesByStudent, list, ui, reload) {
+function paintRows(ctx, spec, students, byStudent, gradesByStudent, list, ui, reload, cacheKey = '') {
   const sheet = list.closest('.journal-sheet')
   const scroll = sheet ? sheet.scrollTop : 0
   list.replaceChildren()
@@ -762,6 +789,9 @@ function paintRows(ctx, spec, students, byStudent, gradesByStudent, list, ui, re
   if (journalError) {
     list.append(el('p', { className: 'journal-error', text: journalError }))
   }
+  if (gradesLoadError) {
+    list.append(el('p', { className: 'journal-error', text: gradesLoadError }))
+  }
   if (!students.length) {
     list.append(el('p', { className: 'muted', text: 'В этой группе пока нет студентов.' }))
   }
@@ -772,10 +802,25 @@ function paintRows(ctx, spec, students, byStudent, gradesByStudent, list, ui, re
       comment: '',
       author: '',
     }
-    const grades = gradesByStudent.get(student.id) || []
+    // ВАЖНО: массив оценок регистрируем в карте до того, как его отдадут в строку.
+    //
+    // Раньше здесь было `gradesByStudent.get(student.id) || []`. Для студента
+    // без оценок это создавало временный массив: addGrade пушил новую оценку
+    // в него, а сама карта о нём не знала. Перерисовка брала из карты снова
+    // undefined — и первая оценка на пару не появлялась никогда, хотя
+    // в базе она уже лежала. Внешне выглядело как «оценки не ставятся».
+    const grades = ensureGrades(gradesByStudent, student.id)
     list.append(
-      renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, () =>
-        paintRows(ctx, spec, students, byStudent, gradesByStudent, list, ui, reload),
+      renderStudentRow(
+        ctx,
+        spec,
+        student,
+        mark,
+        grades,
+        byStudent,
+        index,
+        () => paintRows(ctx, spec, students, byStudent, gradesByStudent, list, ui, reload, cacheKey),
+        cacheKey,
       ),
     )
   })
@@ -1256,7 +1301,7 @@ const EXTRA_ATTS = [
   ['excused', 'отп'],
 ]
 
-function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, repaint) {
+function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, repaint, cacheKey = '') {
   const save = async (patch) => {
     const next = {
       attendance: patch.attendance !== undefined ? patch.attendance || '' : mark.attendance || '',
@@ -1286,8 +1331,41 @@ function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, re
     }
   }
 
+  const syncCache = () => {
+    if (cacheKey) gradesCache.set(cacheKey, grades)
+  }
+
+  /**
+   * Ставим оценку.
+   *
+   * Было: ждём сервер, и только потом показываем чип. Если сервер молчал или
+   * отвечал ошибкой — на экране не менялось ничего, и человек жал «5» ещё раз.
+   * Отсюда четыре одинаковые пятёрки за 11 секунд.
+   *
+   * Стало: чип появляется сразу (оптимистично), а при отказе сервера —
+   * исчезает с понятным сообщением. Повторный такой же тап, пока идёт
+   * сохранение, игнорируется.
+   */
   const addGrade = async (value, kind) => {
     journalError = ''
+    if (isSameTapPending(gradeTapGuard, student.id, value, kind)) return
+    markTapStarted(gradeTapGuard, student.id, value, kind)
+
+    const tempId = `tmp_${student.id}_${Date.now()}_${value}`
+    const optimistic = {
+      id: tempId,
+      studentId: student.id,
+      value,
+      kind,
+      author: '',
+      createdAt: new Date().toISOString(),
+      pending: true,
+    }
+    grades.push(optimistic)
+    syncCache()
+    ctx.state.gradeKind = kind
+    repaint()
+
     try {
       const saved = await addGradeRpc({
         studentId: student.id,
@@ -1299,33 +1377,51 @@ function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, re
         value,
         kind,
       })
-      if (saved?.id) {
-        grades.push({
-          id: saved.id,
-          studentId: student.id,
-          value,
-          kind,
-          author: saved.author || '',
-          createdAt: saved.createdAt || '',
-        })
+      const at = grades.findIndex((g) => g.id === tempId)
+      if (at >= 0) {
+        if (saved?.id) {
+          grades[at] = {
+            id: saved.id,
+            studentId: student.id,
+            value,
+            kind,
+            author: saved.author || '',
+            createdAt: saved.createdAt || '',
+          }
+        } else {
+          grades.splice(at, 1)
+        }
       }
-      ctx.state.gradeKind = kind
+      syncCache()
       repaint()
     } catch (err) {
+      // Откат: не показываем оценку, которую сервер не принял.
+      const at = grades.findIndex((g) => g.id === tempId)
+      if (at >= 0) grades.splice(at, 1)
+      syncCache()
       journalError = err.message || 'Оценка не сохранилась'
       ctx.flash(journalError, true)
       repaint()
+    } finally {
+      markTapFinished(gradeTapGuard, student.id, value, kind)
     }
   }
 
   const removeGrade = async (grade) => {
     journalError = ''
+    const wasPending = grade.pending === true
+    const at = grades.findIndex((g) => g.id === grade.id)
+    if (at >= 0) grades.splice(at, 1)
+    syncCache()
+    repaint()
+    // Несохранённую оценку удалять на сервере нечего — убираем только с экрана.
+    if (wasPending) return
     try {
       await deleteGradeRpc(grade.id)
-      const at = grades.findIndex((g) => g.id === grade.id)
-      if (at >= 0) grades.splice(at, 1)
-      repaint()
     } catch (err) {
+      // Вернуть на место: оценка осталась в базе, значит и на экране должна быть.
+      if (at >= 0) grades.splice(at, 0, grade)
+      syncCache()
       journalError = err.message || 'Не удалилось'
       ctx.flash(journalError, true)
       repaint()
@@ -1361,15 +1457,17 @@ function renderStudentRow(ctx, spec, student, mark, grades, byStudent, index, re
     gradeStrip.append(
       el('button', {
         type: 'button',
-        className: `grade-pill ${gradeClass(Number(g.value), 'present')}`,
+        className: `grade-pill ${gradeClass(Number(g.value), 'present')}${g.pending ? ' is-pending' : ''}`,
         text: String(g.value),
-        title: [
-          GRADE_KINDS.find(([k]) => k === g.kind)?.[1] || 'оценка',
-          g.comment,
-          gStamp,
-        ]
-          .filter(Boolean)
-          .join(' · ') + ' — нажми, чтобы удалить',
+        title: g.pending
+          ? 'Сохраняем…'
+          : [
+              GRADE_KINDS.find(([k]) => k === g.kind)?.[1] || 'оценка',
+              g.comment,
+              gStamp,
+            ]
+              .filter(Boolean)
+              .join(' · ') + ' — нажми, чтобы удалить',
         onClick: () => {
           void removeGrade(g)
         },
