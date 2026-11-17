@@ -1268,9 +1268,40 @@ export function renderNewsComposer(group) {
     }
     try {
       const picked = [...file.files].slice(0, Math.min(room, 4))
-      const hasVideo = picked.some((f) => /^video\//i.test(f.type || ''))
+
+      // Фото кадрируем по одному, под рамку ленты 16:10.
+      //
+      // Зачем: на главной фото показывается в блоке с aspect-ratio 16/10 и
+      // object-fit: cover. Всё, что не влезло в этот прямоугольник, срезается
+      // по краям — а люди пишут текст по краям кадра, и он пропадал.
+      // Редактор тот же, что для аватара, только рамка прямоугольная.
+      const prepared = []
+      for (const f of picked) {
+        const isVideo = /^video\//i.test(f.type || '')
+        if (isVideo) {
+          prepared.push(f)
+          continue
+        }
+        const cropped = await hub.openImageCropEditor(f, {
+          shape: 'square',
+          ratio: 16 / 10,
+          size: 1600,
+          name: f.name || 'news.jpg',
+          heading: 'Подгони фото',
+          hint: '«Целиком» — фото видно всё, поля закрывает размытый фон. «Заполнить кадр» — фото во весь кадр, но края обрежутся.',
+          fitDefault: true,
+        })
+        // Отмена кадрирования = это фото не добавляем, остальные не трогаем.
+        if (cropped) prepared.push(cropped)
+      }
+      if (!prepared.length) {
+        file.value = ''
+        return
+      }
+
+      const hasVideo = prepared.some((f) => /^video\//i.test(f.type || ''))
       showToast(hasVideo ? 'Загружаю видео… это может занять время' : 'Загружаю фото…')
-      const uploaded = await uploadHomeworkFiles(state.groupId, picked)
+      const uploaded = await uploadHomeworkFiles(state.groupId, prepared)
       draft.attachments.push(...uploaded)
       paintPreview()
     } catch (err) {

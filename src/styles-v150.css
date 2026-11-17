@@ -1011,3 +1011,90 @@ html[data-theme='dark'] .cmp-days button.active .cmp-day-dot {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* ── Оценки в журнале: чипы не должны уезжать за край ──────────────
+   На узком телефоне сегмент «+/н/б» занимал всю строку, и полоса с
+   оценками с кнопкой «+» уходила за пределы видимой области. Оценки
+   были в DOM, но их не было видно — снаружи это выглядело как
+   «оценки не ставятся». Теперь полоса всегда переносится на свою
+   строку и не может быть шире контейнера. */
+
+.grade-strip {
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* «+» прижимаем к правому краю, а сами оценки листаются по горизонтали,
+   если их много. Так строка не растягивает карточку. */
+.grade-strip .grade-add {
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .journal-controls {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .journal-controls .seg {
+    flex: 0 0 auto;
+  }
+
+  /* Полоса оценок — отдельной строкой во всю ширину. */
+  .journal-controls .grade-strip {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .grade-strip .grade-add {
+    margin-left: 0;
+  }
+}
+
+/* Оценка, которую сервер ещё не подтвердил: видно, что идёт сохранение. */
+.grade-pill.is-pending {
+  opacity: 0.55;
+  border-style: dashed;
+  animation: grade-pending-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes grade-pending-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grade-pill.is-pending {
+    animation: none;
+  }
+}
+
+/* ── Кадрирование фото события: выбор «Заполнить / Целиком» ────────
+   Заполнить — фото закрывает кадр целиком, лишнее обрезается.
+   Целиком — видно всё фото, поля закрывает размытая копия.
+   Второй режим спасает фото, где текст написан по краям. */
+
+.crop-fit-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.crop-fit-toggle .chip {
+  flex: 0 1 auto;
+}
+
+/* В режиме «целиком» ползунок масштаба не нужен — он отключён. */
+.avatar-crop-zoom:disabled {
+  opacity: 0.45;
+}

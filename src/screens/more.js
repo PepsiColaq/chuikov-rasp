@@ -17,6 +17,7 @@ import { checkConnectivity } from '../lib/supabase.js'
 import { hub } from '../app/hub.js'
 import { tabSwitchShieldActive } from '../app/tab-shield.js'
 import { renderCompare } from './compare.js'
+import { frameSize, isRoundFrame, normalizeRatio, outputSize } from '../lib/crop-geometry.js'
 
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
 const canEdit = (...args) => hub.canEdit(...args)
@@ -1855,16 +1856,26 @@ export function loadImageFromFile(file) {
 
 /**
  * Редактор: подвинуть/приблизить фото под рамку.
- * shape: 'circle' — аватар, 'square' — обложка программы. Возвращает File или null (отмена).
+ *
+ * shape: 'circle' — аватар, 'square' — обложка программы.
+ * ratio: соотношение сторон рамки (ширина / высота). По умолчанию 1 — квадрат.
+ *        Для фото в ленте новостей передаём 16/10 — ровно как в ленте,
+ *        тогда кадр подгоняется заранее и в ленте ничего не срезается.
+ *
+ * Возвращает File или null (отмена).
  */
 export function openImageCropEditor(
   file,
   {
     shape = 'circle',
+    ratio = 1,
     size = 512,
     name = 'avatar.jpg',
     heading = 'Подгони фото',
     hint = 'Перетащи пальцем/мышью и подвигай масштаб — в кружке то, что увидят все.',
+    // Для фото событий по умолчанию лучше «целиком»: текст по краям важнее,
+    // чем заполнение кадра. Для аватара — наоборот, круг должен быть полным.
+    fitDefault = false,
   } = {},
 ) {
   return new Promise(async (resolve) => {
@@ -1877,9 +1888,6 @@ export function openImageCropEditor(
       return
     }
 
-    const VIEW = 260
-    const OUT = Math.max(200, Math.min(1600, Number(size) || 512))
-    const round = shape !== 'square'
     const nw = img.naturalWidth || img.width
     const nh = img.naturalHeight || img.height
     if (!nw || !nh) {
@@ -1888,7 +1896,19 @@ export function openImageCropEditor(
       return
     }
 
-    const coverBase = Math.max(VIEW / nw, VIEW / nh)
+    // Рамка: пропорции считает общий модуль — тот же, что проверяет тест.
+    const ar = normalizeRatio(ratio)
+    const round = isRoundFrame(shape, ratio)
+    const frame = frameSize(ratio)
+    const VIEWW = frame.width
+    const VIEWH = frame.height
+    const outFrame = outputSize(ratio, size)
+    const OUTW = outFrame.width
+    const OUTH = outFrame.height
+
+    const coverBase = Math.max(VIEWW / nw, VIEWH / nh)
+    // Во сколько раз нужно уменьшить, чтобы фото влезло целиком.
+    const fitZoom = Math.min(1, Math.min(VIEWW / nw, VIEWH / nh) / coverBase)
     let zoom = 1
     let ox = 0
     let oy = 0
@@ -1896,6 +1916,12 @@ export function openImageCropEditor(
     let lastX = 0
     let lastY = 0
     let settled = false
+
+    // «Вписать целиком»: фото не обрезается, а пустые поля закрывает
+    // размытая копия — так видно всё, включая текст по краям.
+    let fitWhole = Boolean(fitDefault)
+    // Для режима «целиком» смещение не имеет смысла: фото уже всё видно.
+    const scaleNow = () => (fitWhole ? fitZoom : coverBase * zoom)
 
     const finish = (value) => {
       if (settled) return
@@ -1907,49 +1933,77 @@ export function openImageCropEditor(
 
     const canvas = el('canvas', {
       className: 'avatar-crop-canvas',
-      width: String(VIEW),
-      height: String(VIEW),
+      width: String(VIEWW),
+      height: String(VIEWH),
     })
     const ctx = canvas.getContext('2d')
 
     const clampOffset = () => {
+      if (fitWhole) {
+        ox = 0
+        oy = 0
+        return
+      }
       const s = coverBase * zoom
       const dw = nw * s
       const dh = nh * s
-      const maxX = Math.max(0, (dw - VIEW) / 2)
-      const maxY = Math.max(0, (dh - VIEW) / 2)
+      const maxX = Math.max(0, (dw - VIEWW) / 2)
+      const maxY = Math.max(0, (dh - VIEWH) / 2)
       ox = Math.max(-maxX, Math.min(maxX, ox))
       oy = Math.max(-maxY, Math.min(maxY, oy))
     }
 
-    // Рамка предпросмотра: круг для аватара, скруглённый квадрат для обложки.
+    // Рамка предпросмотра: круг для аватара, прямоугольник для фото/обложки.
     const framePath = (c) => {
       c.beginPath()
       if (round) {
-        c.arc(VIEW / 2, VIEW / 2, VIEW / 2 - 1, 0, Math.PI * 2)
+        c.arc(VIEWW / 2, VIEWH / 2, Math.min(VIEWW, VIEWH) / 2 - 1, 0, Math.PI * 2)
       } else if (typeof c.roundRect === 'function') {
-        c.roundRect(1, 1, VIEW - 2, VIEW - 2, 18)
+        c.roundRect(1, 1, VIEWW - 2, VIEWH - 2, 14)
       } else {
-        c.rect(1, 1, VIEW - 2, VIEW - 2)
+        c.rect(1, 1, VIEWW - 2, VIEWH - 2)
       }
       c.closePath()
+    }
+
+    /**
+     * Нарисовать кадр в произвольный контекст.
+     * Общая функция для предпросмотра и для сохранения — чтобы на экране
+     * было ровно то, что попадёт в файл.
+     */
+    const drawFrame = (c, w, h) => {
+      const s = scaleNow()
+      const dw = nw * s
+      const dh = nh * s
+      // Раздельные масштабы: рамка предпросмотра и выходной файл могут
+      // отличаться на пиксель из-за округления — с одним k кадр бы съезжал.
+      const kx = w / VIEWW
+      const ky = h / VIEWH
+      const ddx = (w - dw * kx) / 2 + ox * kx
+      const ddy = (h - dh * ky) / 2 + oy * ky
+
+      if (fitWhole) {
+        // Фон: размытая копия, растянутая на весь кадр.
+        const sBg = Math.max(w / nw, h / nh)
+        c.save()
+        c.filter = 'blur(14px) brightness(0.6)'
+        c.drawImage(img, (w - nw * sBg) / 2, (h - nh * sBg) / 2, nw * sBg, nh * sBg)
+        c.restore()
+      } else {
+        c.fillStyle = '#111'
+        c.fillRect(0, 0, w, h)
+      }
+      c.drawImage(img, ddx, ddy, dw * kx, dh * ky)
     }
 
     const paint = () => {
       if (!ctx) return
       clampOffset()
-      const s = coverBase * zoom
-      const dw = nw * s
-      const dh = nh * s
-      const dx = (VIEW - dw) / 2 + ox
-      const dy = (VIEW - dh) / 2 + oy
-      ctx.clearRect(0, 0, VIEW, VIEW)
+      ctx.clearRect(0, 0, VIEWW, VIEWH)
       ctx.save()
       framePath(ctx)
       ctx.clip()
-      ctx.fillStyle = '#111'
-      ctx.fillRect(0, 0, VIEW, VIEW)
-      ctx.drawImage(img, dx, dy, dw, dh)
+      drawFrame(ctx, VIEWW, VIEWH)
       ctx.restore()
       framePath(ctx)
       ctx.strokeStyle = 'rgba(255,255,255,0.55)'
@@ -2010,26 +2064,19 @@ export function openImageCropEditor(
         saveBtn.textContent = '…'
         try {
           clampOffset()
-          const s = coverBase * zoom
           const out = document.createElement('canvas')
-          out.width = OUT
-          out.height = OUT
+          out.width = OUTW
+          out.height = OUTH
           const octx = out.getContext('2d')
           if (!octx) throw new Error('Нет canvas')
-          const scaleOut = OUT / VIEW
-          const dw = nw * s * scaleOut
-          const dh = nh * s * scaleOut
-          const dx = (OUT - dw) / 2 + ox * scaleOut
-          const dy = (OUT - dh) / 2 + oy * scaleOut
           if (round) {
             octx.beginPath()
-            octx.arc(OUT / 2, OUT / 2, OUT / 2 - 1, 0, Math.PI * 2)
+            octx.arc(OUTW / 2, OUTH / 2, Math.min(OUTW, OUTH) / 2 - 1, 0, Math.PI * 2)
             octx.closePath()
             octx.clip()
           }
-          octx.fillStyle = '#111'
-          octx.fillRect(0, 0, OUT, OUT)
-          octx.drawImage(img, dx, dy, dw, dh)
+          // Те же вычисления, что в предпросмотре — экран не врёт.
+          drawFrame(octx, OUTW, OUTH)
           const blob = await new Promise((res) => out.toBlob(res, 'image/jpeg', 0.9))
           if (!blob) throw new Error('Не удалось обрезать')
           finish(new File([blob], name, { type: 'image/jpeg' }))
@@ -2055,12 +2102,63 @@ export function openImageCropEditor(
       'aria-label': heading,
     })
     if (!round) canvas.classList.add('is-square')
+    canvas.style.aspectRatio = `${VIEWW} / ${VIEWH}`
+
+    // Переключатель «Заполнить ⇄ Целиком».
+    //
+    // Заполнить — фото закрывает весь кадр, лишнее обрезается.
+    // Целиком — видно всё фото, поля закрывает размытая копия.
+    // Для события с текстом по краям нужен второй режим: иначе текст пропадёт.
+    const fitRow = round
+      ? null
+      : (() => {
+          const row = el('div', { className: 'crop-fit-toggle' })
+          const fillBtn = el('button', {
+            type: 'button',
+            className: 'chip',
+            text: 'Заполнить кадр',
+            onClick: () => {
+              if (!fitWhole) return
+              fitWhole = false
+              zoomInput.disabled = false
+              fillBtn.classList.add('chip-active')
+              wholeBtn.classList.remove('chip-active')
+              paint()
+            },
+          })
+          const wholeBtn = el('button', {
+            type: 'button',
+            className: 'chip',
+            text: 'Целиком',
+            onClick: () => {
+              if (fitWhole) return
+              fitWhole = true
+              zoomInput.disabled = true
+              wholeBtn.classList.add('chip-active')
+              fillBtn.classList.remove('chip-active')
+              paint()
+            },
+          })
+          if (fitWhole) {
+            wholeBtn.classList.add('chip-active')
+            zoomInput.disabled = true
+          } else {
+            fillBtn.classList.add('chip-active')
+          }
+          row.append(
+            el('span', { className: 'muted', text: 'Кадр' }),
+            fillBtn,
+            wholeBtn,
+          )
+          return row
+        })()
 
     overlay.append(
       el('div', { className: 'avatar-crop-sheet' }, [
         el('h3', { text: heading }),
         el('p', { className: 'muted', text: hint }),
         el('div', { className: 'avatar-crop-stage' }, [canvas]),
+        fitRow,
         el('div', { className: 'avatar-crop-zoom-row' }, [
           el('span', { className: 'muted', text: 'Масштаб' }),
           zoomInput,
