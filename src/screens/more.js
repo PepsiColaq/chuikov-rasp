@@ -19,6 +19,20 @@ import { tabSwitchShieldActive } from '../app/tab-shield.js'
 import { renderCompare } from './compare.js'
 import { frameSize, isRoundFrame, outputSize } from '../lib/crop-geometry.js'
 
+/**
+ * Куда ведёт «Написать в Telegram».
+ *
+ * Раньше здесь был бот @rasphelp_bot: он принимал обращения, складывал их
+ * в таблицу и пересылал админу карточки с кнопкой «Ответить». За полтора
+ * месяца так пришло 9 сообщений — а держать ради этого приходилось токен,
+ * поллер на GitHub Actions, цепочку перезапусков и таблицу состояния.
+ * Каждая часть ломалась хотя бы раз, и в итоге сообщения просто не доходили.
+ *
+ * Личный профиль решает ту же задачу без единой движущейся части.
+ * Менять адрес — только здесь.
+ */
+const SUPPORT_TG_URL = 'https://t.me/snickers342'
+
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
 const canEdit = (...args) => hub.canEdit(...args)
 const confirmAndLogout = (...args) => hub.confirmAndLogout(...args)
@@ -1177,14 +1191,14 @@ export function renderMoreV2() {
       el('p', {
         className: 'muted',
         style: 'margin:0 0 12px',
-        text: 'Вопросы и идеи по сайту — напиши в Telegram, ответим туда же.',
+        text: 'Вопросы и идеи по сайту — напиши в Telegram, отвечу лично.',
       }),
       el('a', {
         className: 'btn',
-        href: 'https://t.me/rasphelp_bot',
+        href: SUPPORT_TG_URL,
         target: '_blank',
         rel: 'noopener noreferrer',
-        text: 'Написать в поддержку',
+        text: 'Написать в Telegram',
         style: 'display:inline-flex;text-align:center;text-decoration:none',
       }),
     ]),
@@ -1294,14 +1308,14 @@ export function renderMoreClassic() {
       el('p', {
         className: 'muted',
         style: 'margin:0 0 10px',
-        text: 'Вопросы и идеи по сайту — напиши в Telegram, ответим туда же.',
+        text: 'Вопросы и идеи по сайту — напиши в Telegram, отвечу лично.',
       }),
       el('a', {
         className: 'btn',
-        href: 'https://t.me/rasphelp_bot',
+        href: SUPPORT_TG_URL,
         target: '_blank',
         rel: 'noopener noreferrer',
-        text: 'Написать в поддержку',
+        text: 'Написать в Telegram',
         style: 'display:inline-block;text-align:center;text-decoration:none',
       }),
     ]),
@@ -1656,14 +1670,19 @@ export function renderMoreSupport() {
       el('p', {
         className: 'muted',
         style: 'margin:0',
-        text: 'Что-то не работает, криво показывается или есть идея — напиши нам в Telegram. Ответим туда же, обычно в тот же день.',
+        text: 'Что-то не работает, криво показывается или есть идея — напиши в Telegram. Отвечу лично, обычно в тот же день.',
       }),
       el('a', {
         className: 'btn support-hero-btn',
-        href: 'https://t.me/rasphelp_bot',
+        href: SUPPORT_TG_URL,
         target: '_blank',
         rel: 'noopener noreferrer',
         text: 'Написать в Telegram',
+      }),
+      el('p', {
+        className: 'muted',
+        style: 'margin:10px 0 0;font-size:13px',
+        text: 'Пиши сразу в чат — бот и очередь обращений больше не нужны, сообщение увижу напрямую.',
       }),
     ]),
     el('div', { className: 'card' }, [
@@ -1677,17 +1696,7 @@ export function renderMoreSupport() {
     ]),
   )
 
-  if (session?.role === 'admin') {
-    panel.append(
-      el('div', { className: 'card' }, [
-        el('p', {
-          className: 'muted',
-          style: 'margin:0',
-          text: 'Обращения студентов приходят в Telegram-бот, а очередь видна в админке → «Обращения».',
-        }),
-      ]),
-    )
-  } else {
+  if (session?.role !== 'admin') {
     panel.append(
       el('div', { className: 'card' }, [
         el('h3', { text: 'Частые вопросы' }),

@@ -2,45 +2,45 @@
  "steps": [
   {
    "label": "boot",
-   "len": 14395,
+   "len": 14390,
    "nodes": 254,
    "buttons": 44,
-   "hash": "f5ab95324e07f19d"
+   "hash": "021690d05008f4be"
   },
   {
    "label": "tab home",
-   "len": 14395,
+   "len": 14390,
    "nodes": 254,
    "buttons": 44,
-   "hash": "f5ab95324e07f19d"
+   "hash": "021690d05008f4be"
   },
   {
    "label": "tab schedule",
-   "len": 14401,
+   "len": 14396,
    "nodes": 254,
    "buttons": 44,
-   "hash": "5b5ab099fb1dcefa"
+   "hash": "144a2ed553235a56"
   },
   {
    "label": "tab grades",
-   "len": 14406,
+   "len": 14401,
    "nodes": 254,
    "buttons": 44,
-   "hash": "18da15544960adf8"
+   "hash": "8957c7a044a2ac28"
   },
   {
    "label": "tab teachers",
-   "len": 14431,
+   "len": 14426,
    "nodes": 254,
    "buttons": 44,
-   "hash": "e849a2d4b35f7395"
+   "hash": "f55e8200529a6fd8"
   },
   {
    "label": "tab more",
-   "len": 14411,
+   "len": 14406,
    "nodes": 254,
    "buttons": 44,
-   "hash": "43f5b82a89cecdfd"
+   "hash": "a619468d2e2b5096"
   },
   {
    "label": "more:students",
@@ -73,10 +73,10 @@
   },
   {
    "label": "more:support",
-   "len": 10731,
-   "nodes": 192,
+   "len": 10868,
+   "nodes": 193,
    "buttons": 36,
-   "hash": "5c6cd1b56553699d"
+   "hash": "511f0ad6e721f4f3"
   },
   {
    "label": "after 1 clicks",
