@@ -17,7 +17,7 @@ import { checkConnectivity } from '../lib/supabase.js'
 import { hub } from '../app/hub.js'
 import { tabSwitchShieldActive } from '../app/tab-shield.js'
 import { renderCompare } from './compare.js'
-import { frameSize, isRoundFrame, normalizeRatio, outputSize } from '../lib/crop-geometry.js'
+import { frameSize, isRoundFrame, outputSize } from '../lib/crop-geometry.js'
 
 // Эти функции живут в main.js — зовём их через мост, а не импортом (иначе цикл).
 const canEdit = (...args) => hub.canEdit(...args)
@@ -1897,7 +1897,6 @@ export function openImageCropEditor(
     }
 
     // Рамка: пропорции считает общий модуль — тот же, что проверяет тест.
-    const ar = normalizeRatio(ratio)
     const round = isRoundFrame(shape, ratio)
     const frame = frameSize(ratio)
     const VIEWW = frame.width
