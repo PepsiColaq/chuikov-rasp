@@ -81,16 +81,40 @@ const sha = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 
 
 function snap(label) {
   const app = window.document.getElementById('app')
-  const markup = app ? app.innerHTML : ''
+  // Блок «Связь с сервером» (экран поддержки) наполняется результатом
+  // реальных сетевых запросов и на каждом запуске разный: локально он
+  // ещё показывает «Проверяем…», на живом сайте уже успевает получить
+  // ответы. К вёрстке это отношения не имеет — сравниваем без него.
+  const clone = app ? app.cloneNode(true) : null
+  if (clone) {
+    clone.querySelectorAll('.support-net-body').forEach((n) => {
+      n.textContent = '[net-check]'
+    })
+  }
+  const markup = clone ? clone.innerHTML : ''
   // нормализуем нестабильные вещи: время, id
   const stable = markup
     .replace(/id="[^"]*"/g, 'id=""')
+    // Путь к ассетам зависит от base: локально «/», на GitHub Pages
+    // «/chuikov-rasp/». Это настройка сборки, а не поведение приложения.
+    // Без нормализации живой бандл всегда «расходился» с эталоном.
+    // Остаток пути сохраняется — неверное имя файла всё равно поймаем.
+    .replace(/\/chuikov-rasp\//g, '/')
+    // Подпись внизу профиля зависит от того, вкомпилированы ли ключи
+    // Supabase: в тестах их нет, на живом сайте есть. Текст честно разный,
+    // структура та же — поэтому сравниваем структуру.
+    .replace(/Общая база включена[^<]*/g, '[footer-status]')
+    .replace(/Неофициальный студенческий ресурс\. Сейчас локальный режим[^<]*/g, '[footer-status]')
     .replace(/\d{2}:\d{2}/g, 'HH:MM')
     .replace(/\d{2}\.\d{2}\.\d{4}/g, 'DD.MM.YYYY')
   steps.push({
     label,
-    len: markup.length,
-    nodes: app ? app.querySelectorAll('*').length : 0,
+    // Длина — по нормализованной строке: иначе она расходилась бы там же,
+    // где мы сознательно нормализовали текст.
+    len: stable.length,
+    // Узлы — по клону: иначе внутри блока проверки связи их считалось бы
+    // разное число в зависимости от того, успели ли прийти ответы.
+    nodes: clone ? clone.querySelectorAll('*').length : 0,
     buttons: window.document.querySelectorAll('button').length,
     hash: sha(stable),
   })
