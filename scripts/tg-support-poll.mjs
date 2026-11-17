@@ -49,6 +49,67 @@ async function tg(method, body) {
   return res.json()
 }
 
+/**
+ * Ошибка, после которой крутить цикл бессмысленно.
+ *
+ * Было: при недействительном токене Telegram отвечал 401 на каждый
+ * getUpdates, once() писал ошибку в лог и возвращался, а цикл main()
+ * тут же звал once() снова. За 4,5 минуты набегало 817 одинаковых
+ * «401 Unauthorized» — по логу невозможно было понять, что случилось.
+ *
+ * Стало: 401/403 — это «токен мёртв», выходим сразу и говорим,
+ * что именно делать. Остальные ошибки (сеть, 502 от Telegram) —
+ * не повод падать, но и не повод долбить сервер: пауза перед повтором.
+ */
+class FatalBotError extends Error {}
+
+function isAuthError(r) {
+  return r && (r.error_code === 401 || r.error_code === 403)
+}
+
+function authHelp(where) {
+  return [
+    `Бот не авторизовался (${where}): ${'401/403 Unauthorized'}.`,
+    'Токен недействителен или отозван.',
+    'Что делать: открыть @BotFather → /mybots → выбрать бота → API Token,',
+    'скопировать новый токен и обновить GitHub Secret TG_BOT_TOKEN',
+    '(Settings → Secrets and variables → Actions). Больше ничего менять не нужно.',
+  ].join('\n')
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Проверить токен до начала работы.
+ * Возвращает username бота или бросает FatalBotError.
+ */
+async function checkToken() {
+  let me = null
+  let lastErr = null
+  // Сеть на собираемой машине может моргнуть. Один сетевой сбой — не повод
+  // падать: три попытки, потом уже честно говорим, что не дозвонились.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      me = await tg('getMe', {})
+      break
+    } catch (e) {
+      lastErr = e
+      if (attempt < 3) await sleep(4000)
+    }
+  }
+  if (!me) {
+    throw new FatalBotError(
+      `Не удалось связаться с api.telegram.org за 3 попытки: ${lastErr?.message || lastErr}. ` +
+        'Проверь настройки сети у раннера (или что Telegram не заблокирован).',
+    )
+  }
+  if (!me.ok) {
+    if (isAuthError(me)) throw new FatalBotError(authHelp('getMe'))
+    throw new FatalBotError(`getMe не сработал: ${me.error_code} ${me.description || ''}`)
+  }
+  return me.result?.username || 'bot'
+}
+
 function studentKeyboard() {
   return {
     keyboard: [[{ text: BTN_SUPPORT }]],
@@ -600,7 +661,12 @@ async function once() {
   }
 
   if (!updates.ok) {
-    console.error(updates)
+    if (isAuthError(updates)) throw new FatalBotError(authHelp('getUpdates'))
+    const text = `getUpdates: ${updates.error_code} ${updates.description || ''}`
+    console.error(text)
+    // Не крутим цикл вхолостую: при 5-секундном ожидании Telegram
+    // лишняя пауза ничего не ломает, а при ошибке — спасает лог.
+    if (process.argv.includes('--loop')) await sleep(5000)
     return
   }
 
@@ -626,17 +692,28 @@ async function main() {
   const minArg = process.argv.find((a) => a.startsWith('--minutes='))
   const minutes = minArg ? Number(minArg.split('=')[1]) : 0
 
+  // До первого getUpdates убеждаемся, что токен вообще рабочий.
+  // Один запрос вместо сотни бесполезных в логе.
+  const botName = await checkToken()
+  console.log('бот на связи:', botName)
+
   if (loop || minutes > 0) {
     const until = minutes > 0 ? Date.now() + minutes * 60 * 1000 : Infinity
     console.log('tg-support poller loop, admin=', ADMIN, minutes ? `for ${minutes}m` : 'forever')
     // Make getUpdates long-poll when looping
     if (!process.argv.includes('--loop')) process.argv.push('--loop')
+    let failures = 0
     while (Date.now() < until) {
       try {
         await once()
+        failures = 0
       } catch (e) {
-        console.error('loop error', e)
-        await new Promise((r) => setTimeout(r, 3000))
+        if (e instanceof FatalBotError) throw e
+        failures++
+        // 3с, 6с, 12с… но не больше минуты — иначе GitHub убьёт job раньше.
+        const wait = Math.min(60000, 3000 * 2 ** Math.min(failures - 1, 5))
+        console.error('loop error', e.message || e, `— повтор через ${Math.round(wait / 1000)}с`)
+        await sleep(wait)
       }
     }
     console.log('loop window done')
@@ -646,6 +723,10 @@ async function main() {
 }
 
 main().catch((e) => {
+  if (e instanceof FatalBotError) {
+    console.error('\n' + e.message + '\n')
+    process.exit(1)
+  }
   console.error(e)
   process.exit(1)
 })
