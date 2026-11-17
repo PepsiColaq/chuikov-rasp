@@ -9,8 +9,8 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const TOKEN = process.env.TG_BOT_TOKEN
-const ADMIN = String(process.env.TG_ADMIN_CHAT_ID || '')
+const TOKEN = String(process.env.TG_BOT_TOKEN || '').trim()
+const ADMIN = String(process.env.TG_ADMIN_CHAT_ID || '').trim()
 const SB_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_DIRECT_URL || '').replace(
   /\/$/,
   '',
@@ -24,6 +24,29 @@ if (!TOKEN) {
 }
 if (!ADMIN) {
   console.error('Нет TG_ADMIN_CHAT_ID: задай переменную окружения или GitHub Secret.')
+  process.exit(1)
+}
+
+/**
+ * Похож ли токен на телеграмный.
+ *
+ * Токен всегда такой: <цифры>:<35+ символов>. Если в секрет попал
+ * пробел, перевод строки или скопировалась половина — Telegram ответит
+ * тем же 401, что и на отозванный токен, и по логу не понять, в чём дело.
+ * Здесь мы отличаем «опечатка при вставке» от «токен отозван».
+ * Сам токен при этом никуда не печатается.
+ */
+const TOKEN_LOOKS_VALID = /^\d{5,}:[A-Za-z0-9_-]{30,}$/.test(TOKEN)
+if (!TOKEN_LOOKS_VALID) {
+  console.error(
+    [
+      'TG_BOT_TOKEN не похож на токен Telegram.',
+      `Длина: ${TOKEN.length} символов, двоеточий: ${(TOKEN.match(/:/g) || []).length}.`,
+      'Ожидается вид 123456789:AAH... (цифры, двоеточие, ~35 символов).',
+      'Скорее всего при вставке в GitHub Secret попал пробел или перевод строки,',
+      'либо скопировалась только часть. Скопируй токен у @BotFather целиком.',
+    ].join('\n'),
+  )
   process.exit(1)
 }
 
