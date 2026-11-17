@@ -66,11 +66,13 @@ function adminKeyboard(hasTickets) {
   }
 }
 
-function loadStore() {
+function emptyStore() {
+  return { offset: 0, awaiting: {}, tickets: [], adminIndex: 0, adminReplyTo: null }
+}
+
+function readLocalStore() {
   try {
-    if (!existsSync(STORE_PATH)) {
-      return { offset: 0, awaiting: {}, tickets: [], adminIndex: 0, adminReplyTo: null }
-    }
+    if (!existsSync(STORE_PATH)) return emptyStore()
     const raw = JSON.parse(readFileSync(STORE_PATH, 'utf8'))
     return {
       offset: Number(raw.offset || 0),
@@ -80,16 +82,70 @@ function loadStore() {
       adminReplyTo: raw.adminReplyTo || null,
     }
   } catch {
-    return { offset: 0, awaiting: {}, tickets: [], adminIndex: 0, adminReplyTo: null }
+    return emptyStore()
   }
 }
 
-function saveStore(store) {
+function writeLocalStore(store) {
   try {
     mkdirSync(dirname(STORE_PATH), { recursive: true })
     writeFileSync(STORE_PATH, JSON.stringify(store, null, 2), 'utf8')
   } catch (e) {
     console.error('save store', e.message || e)
+  }
+}
+
+/**
+ * Состояние бота между запусками.
+ *
+ * Было: только файл scripts/.tg-support-store.json. Он в .gitignore,
+ * а GitHub Actions каждый запуск поднимает чистую машину — файла нет.
+ * Поэтому offset каждый раз начинался с нуля, Telegram заново отдавал
+ * те же сообщения, а «жду вопроса от студента» терялось. Снаружи это
+ * выглядело как «бот не работает».
+ *
+ * Стало: главное хранилище — таблица tg_bot_state в Supabase,
+ * файл остался резервом для локального запуска (если нет ключей).
+ */
+let storeLoaded = null
+
+async function loadStore() {
+  if (storeLoaded) return storeLoaded
+  if (SB_URL && SB_KEY) {
+    try {
+      const rows = await sb('tg_bot_state?key=eq.cli&select=value')
+      const value = rows?.[0]?.value
+      if (value && typeof value === 'object') {
+        storeLoaded = {
+          offset: Number(value.offset || 0),
+          awaiting: value.awaiting && typeof value.awaiting === 'object' ? value.awaiting : {},
+          tickets: Array.isArray(value.tickets) ? value.tickets : [],
+          adminIndex: Number(value.adminIndex || 0),
+          adminReplyTo: value.adminReplyTo || null,
+        }
+        return storeLoaded
+      }
+    } catch (e) {
+      console.error('load store from supabase', e.message || e)
+    }
+  }
+  storeLoaded = readLocalStore()
+  return storeLoaded
+}
+
+async function saveStore(store) {
+  storeLoaded = store
+  // Локальная копия — чтобы отладка без сети работала как раньше.
+  writeLocalStore(store)
+  if (!SB_URL || !SB_KEY) return
+  try {
+    await sb('tg_bot_state?on_conflict=key', {
+      method: 'POST',
+      prefer: 'resolution=merge-duplicates,return=minimal',
+      body: { key: 'cli', value: store, updated_at: new Date().toISOString() },
+    })
+  } catch (e) {
+    console.error('save store to supabase', e.message || e)
   }
 }
 
@@ -457,10 +513,62 @@ async function handleMessage(store, adminId, msg) {
   })
 }
 
+/**
+ * Проверить, отвечает ли адрес webhook.
+ *
+ * Нужно, чтобы не снести рабочий webhook: если воркер оживёт после
+ * передеплоя, скрипт не должен его отключать и перехватывать сообщения
+ * на себя.
+ *
+ * @returns {Promise<boolean>} true — адрес живой
+ */
+async function webhookAlive(url) {
+  if (!url) return false
+  try {
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), 8000)
+    const res = await fetch(url, { method: 'GET', signal: ctl.signal })
+    clearTimeout(timer)
+    // Воркер на GET обычно отвечает 200/405 — главное, что он существует.
+    // 404 — типичный ответ Cloudflare на незадеплоенный воркер.
+    return res.status !== 404
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Снять webhook, если он указывает в мёртвый адрес.
+ *
+ * Зачем: production-схема — Cloudflare Worker с webhook. Но воркер
+ * rasp-tg-support отдаёт 404 (не задеплоен). Telegram продолжает стучаться
+ * в мёртвый адрес, на getUpdates отвечает 409, а старый код на 409 просто
+ * выходил. В итоге сообщения не доходили вовсе: последнее обращение
+ * в базе — 13 октября, ровно с момента падения воркера.
+ *
+ * Живой webhook не трогаем никогда — иначе после передеплоя воркера
+ * скрипт начал бы перехватывать сообщения на себя.
+ */
+async function dropDeadWebhook() {
+  const info = await tg('getWebhookInfo', {})
+  const url = info?.result?.url || ''
+  if (!url) return false
+  if (await webhookAlive(url)) {
+    console.log('webhook жив, не трогаем:', url)
+    return false
+  }
+  const r = await tg('deleteWebhook', { drop_pending_updates: false })
+  if (!r.ok) {
+    console.error('deleteWebhook failed', r)
+    return false
+  }
+  console.log('webhook указывал в мёртвый адрес, снят:', url)
+  return true
+}
+
 async function once() {
-  const store = loadStore()
+  const store = await loadStore()
   const adminId = ADMIN
-  // Do NOT deleteWebhook here — production uses Cloudflare webhook.
 
   try {
     const sent = await flushPendingReplies()
@@ -469,18 +577,29 @@ async function once() {
     console.error('flush', e.message || e)
   }
 
-  // If webhook is set, getUpdates will fail with 409 — that's OK for GH Actions backup.
   let offset = store.offset || 0
-  const updates = await tg('getUpdates', {
-    offset: offset || undefined,
-    timeout: process.argv.includes('--loop') ? 25 : 0,
-    allowed_updates: ['message'],
-  })
-  if (!updates.ok) {
-    if (updates.error_code === 409) {
-      console.log('webhook active — skip getUpdates, flushed pending only')
+  const ask = () =>
+    tg('getUpdates', {
+      offset: offset || undefined,
+      timeout: process.argv.includes('--loop') ? 25 : 0,
+      allowed_updates: ['message'],
+    })
+
+  let updates = await ask()
+
+  // 409 — значит стоит webhook. Если он указывает в мёртвый воркер,
+  // опрос не запустится никогда. Снимаем и пробуем ещё раз.
+  if (!updates.ok && updates.error_code === 409) {
+    const dropped = await dropDeadWebhook()
+    if (dropped) {
+      updates = await ask()
+    } else {
+      console.log('webhook активен и не снят — пропускаю этот запуск')
       return
     }
+  }
+
+  if (!updates.ok) {
     console.error(updates)
     return
   }
@@ -496,7 +615,7 @@ async function once() {
     }
   }
   store.offset = offset
-  saveStore(store)
+  await saveStore(store)
   if ((updates.result || []).length) {
     console.log('processed', updates.result.length, 'offset', offset)
   }
