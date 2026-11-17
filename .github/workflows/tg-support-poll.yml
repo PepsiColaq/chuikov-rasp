@@ -1,9 +1,18 @@
 # Telegram support bot — runs on GitHub (no local PC needed)
+#
+# Почему job живёт почти 6 часов, а не 4,5 минуты:
+# GitHub сильно троттлит schedule — «каждые 5 минут» на деле срабатывает
+# 3–4 раза в день. При коротком job'е бот был мёртв почти всё время:
+# сообщение приходило, а прочитать его было некому до следующего запуска.
+#
+# Лимит одного job'а — 6 часов (жёсткое ограничение GitHub). Поэтому
+# берём 5ч40м: почти всё время бот на связи. Следующий запуск встаёт
+# в очередь (concurrency) и подхватывает сразу после текущего.
+# Для публичного репозитория минуты Actions бесплатны.
 name: tg-support-poll
 on:
   workflow_dispatch:
   schedule:
-    # Every 5 minutes; each job listens ~4.5 min → near-continuous
     - cron: '*/5 * * * *'
 concurrency:
   group: tg-support-poll
@@ -11,7 +20,7 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,4 +32,4 @@ jobs:
           TG_ADMIN_CHAT_ID: ${{ secrets.TG_ADMIN_CHAT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/tg-support-poll.mjs --minutes=4.5
+        run: node scripts/tg-support-poll.mjs --minutes=340
