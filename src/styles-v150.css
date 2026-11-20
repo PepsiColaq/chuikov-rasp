@@ -922,12 +922,7 @@ html[data-theme='dark'] .cmp-days button.active .cmp-day-dot {
   }
 }
 
-/* Пояснения и пустые состояния */
-.cmp-note {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.4;
-}
+/* Пустые состояния */
 
 .cmp-empty h3 {
   margin: 0 0 4px;

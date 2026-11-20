@@ -684,27 +684,6 @@ export function renderCompare() {
   const side = renderSideBySide(result, mine.name, other.name)
   if (side) panel.append(side)
 
-  // ── Пояснения
-  const notes = []
-  notes.push(
-    el('p', {
-      className: 'muted cmp-note',
-      text: 'Дистанционные пары считаются «дома»: в колледже в это время никого нет.',
-    }),
-  )
-  if (
-    formationOther.show &&
-    state.compareFormationCancelled !== `${other.id}|${dateStr}`
-  ) {
-    notes.push(
-      el('p', {
-        className: 'muted cmp-note',
-        text: `Построение ${other.name} показано по расписанию: отмену по чужой группе сайт видит, только если ты вошёл.`,
-      }),
-    )
-  }
-  panel.append(el('div', { className: 'card cmp-detail' }, notes))
-
   // ── Отправить другу
   panel.append(
     el('button', {
