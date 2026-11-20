@@ -144,7 +144,7 @@ import { auditCard, auditGroupName, auditSnapshot, auditTitle, auditWhen, downlo
 import { attachCardSwipe, canWriteNews, createReaderShell, formatNewsDate, homeNoLessonsText, homeProgramKind, listFaculties, lockReaderScroll, mountReaderCards, openNewsReader, renderHome, renderHomeHero, renderHomeNow, renderNewsComposer, scrollReaderTo, splitNewsMedia, startHeroAutoSlide, syncComposeToggle, unlockReaderScroll } from './features/news.js'
 import { canManagePrograms, emptyProgramDraft, openProgramReader, programGroupId, programImages, programMetaLine, programVideoSrc, renderProgramEditor, renderPrograms } from './features/programs.js'
 import { clearCascadeAnim, loadImageFromFile, moreSettingsRow, moreSvg, moreThemeIcon, openImageCropEditor, openProgramScreen, paintStaffCard, renderBannedGate, renderCabinetCard, renderClosedGate, renderMore, renderMoreClassic, renderMoreContacts, renderMoreGroup, renderMoreMyCode, renderMoreOverrides, renderMoreStudents, renderMoreSupport, renderMoreV2, renderNav, renderProfileAvatarControls } from './screens/more.js'
-import { auditDate, calendarDateForWeekday, canEdit, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, hhmmToMinutes, humanMins, isPageReload, normalizeSuggestKey, nowMinutesOfDay, relativeTime, roleRu, shortPersonName, shortSubjectLabel, stripIds, subtractMinutes, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso } from './lib/time.js'
+import { auditDate, calendarDateForWeekday, canEdit, clockOverrideLabel, dateForWeekday, daySwapPanelClass, formatDateRu, formatPhone, hhmmToMinutes, humanMins, isPageReload, normalizeSuggestKey, nowMinutesOfDay, relativeTime, roleRu, shortPersonName, shortSubjectLabel, stripIds, subtractMinutes, teacherDateLabel, todayISO, typeLabel, weekRangeLabel, weekdayFromISO, weekdayNumFromIso } from './lib/time.js'
 import { buildRoomResultsNodes, buildTeacherResultsNodes, renderRoomSearch, renderRoomSlotCard, renderTeacherSearch, renderTeacherSlotCard, renderTeachersTab, resolveFreeRoomsSlotKey, roomLink } from './screens/directory.js'
 import { buildPersistentPager, getPagerTrack, journalCtx, pagerIndex, pagerSetX, pagerSnapToIndex, pagerWidth, paneTabId, readPaneScroll, renderStudyTab, renderTabBody, resetWindowScroll, restorePaneScroll, sizePagerPanes, softUpdateNav, softUpdateTopLead, withTabScrollPreserved } from './app/pager.js'
 import { cancelGroupPicker, confirmAndLogout, gotoTab, openGroupPicker, openMoreScreen, pickGroupWithFeel, refreshTabPanes, renderTop, selectGroup, sessionPillText, swipe, swipeAbort, swipeApplyOffset, swipeCanStart, swipeFinish, swipeResetFlags, switchTab, tabLeadText } from './app/navigation.js'
@@ -626,6 +626,23 @@ async function boot() {
 
   const showSplash = BOOT_SPLASH && !isPageReload()
 
+  // Подменённое время (?now=) — предупреждаем, иначе легко поверить, что так и есть.
+  const clockNote = clockOverrideLabel()
+  if (clockNote) {
+    document.documentElement.dataset.clockOverride = clockNote
+    const strip = document.createElement('div')
+    strip.className = 'clock-override-note'
+    strip.innerHTML =
+      '<span>Часы сайта переведены на <strong>' + clockNote + '</strong> — это для проверки.</span>' +
+      '<button type="button">Вернуть реальное время</button>'
+    strip.querySelector('button').addEventListener('click', () => {
+      const url = new URL(location.href)
+      url.searchParams.delete('now')
+      location.replace(url.toString())
+    })
+    document.body.appendChild(strip)
+  }
+
   // ВАЖНО: не ждём initStore() перед показом — иначе на медленном телефоне
   // заставка висит до конца сетевой загрузки (был баг ~15 сек).
   const initPromise = initStore()
@@ -1102,7 +1119,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=167`, { scope: base })
+    .register(`${base}sw.js?v=168`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда

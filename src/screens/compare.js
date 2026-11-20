@@ -146,6 +146,7 @@ function renderNowForToday(result, mineName, otherName, dateStr) {
   if (!dateStr || dateStr !== todayISO()) return null
   if (result.empty) return null
 
+  const names = pairColumnNames(mineName, otherName)
   const now = nowMinutesOfDay()
   if (now < result.dayStart || now >= result.dayEnd) {
     return el('div', { className: 'card cmp-now is-over' }, [
@@ -158,16 +159,22 @@ function renderNowForToday(result, mineName, otherName, dateStr) {
   const current = result.segments.find((s) => now >= s.start && now < s.end)
   const next = result.meetings.find((m) => m.start > now)
 
+  // Та же правда, что в таблице: «Свободен» и «Занятия закончились» — разные
+  // вещи. Раньше карточка говорила «Ты свободен», а строкой ниже таблица
+  // писала «Занятия закончились», и это читалось как ошибка.
+  const nowLine = (detail, finished) =>
+    finished && detail.state === 'free' ? 'Занятия закончились' : groupLine(detail)
+
   const rows = []
   if (current) {
     rows.push(
       el('div', { className: 'cmp-now-line' }, [
         el('span', { className: 'cmp-now-who', text: 'Ты' }),
-        el('span', { className: 'cmp-now-what', text: groupLine(current.mine) }),
+        el('span', { className: 'cmp-now-what', text: nowLine(current.mine, current.mineFinished) }),
       ]),
       el('div', { className: 'cmp-now-line' }, [
-        el('span', { className: 'cmp-now-who', text: otherName.replace(/^\d{4}-/, '') }),
-        el('span', { className: 'cmp-now-what', text: groupLine(current.other) }),
+        el('span', { className: 'cmp-now-who', text: names.other }),
+        el('span', { className: 'cmp-now-what', text: nowLine(current.other, current.otherFinished) }),
       ]),
     )
   }
@@ -183,8 +190,8 @@ function renderNowForToday(result, mineName, otherName, dateStr) {
   if (current && (mineGone || otherGone) && current.kind === 'break') {
     headline = mineGone && otherGone ? 'У обоих занятия закончились' : 'Занятия закончились не у всех'
     sub = mineGone
-      ? `У тебя на сегодня всё, у ${otherName.replace(/^\d{4}-/, '')} ещё идут занятия.`
-      : `У ${otherName.replace(/^\d{4}-/, '')} на сегодня всё, у тебя ещё идут занятия.`
+      ? `У тебя на сегодня всё, у ${names.other} ещё идут занятия.`
+      : `У ${names.other} на сегодня всё, у тебя ещё идут занятия.`
   } else if (current && current.kind === 'break' && current.end - now >= MIN_NOW_BREAK) {
     headline = 'Вы оба свободны — можно идти друг к другу'
   } else if (current && current.kind === 'formation') {
@@ -264,6 +271,24 @@ function renderTimeline(result, nowMin) {
 }
 
 /**
+ * Подписи колонок «своя / вторая».
+ *
+ * Год в начале («0901-ПД3») обычно срезается, чтобы не занимать ширину.
+ * Но у 0901-ПД3 и 0903-ПД3 различие как раз в этих четырёх знаках: после
+ * срезания обе колонки назывались «ПД3», и экран выглядел так, будто
+ * группа сравнивается сама с собой. Поэтому при совпадении год возвращаем.
+ */
+function pairColumnNames(mineName, otherName) {
+  const strip = (n) => String(n || '').replace(/^\d{4}-/, '') || String(n || '')
+  const mine = strip(mineName)
+  const other = strip(otherName)
+  if (mine === other) {
+    return { mine: String(mineName || ''), other: String(otherName || ''), full: true }
+  }
+  return { mine, other }
+}
+
+/**
  * Что у группы в этот отрезок — одной строкой.
  * «Литература · каб. 413», «Свободен», «Дома (дистант)».
  */
@@ -309,7 +334,7 @@ function renderSideBySide(result, mineName, otherName, nowMin) {
   const rows = scheduleRows(result)
   if (!rows.length) return null
 
-  const shortName = (n) => String(n || '').replace(/^\d{4}-/, '') || String(n || '')
+  const names = pairColumnNames(mineName, otherName)
 
   // Подсветка берётся ИЗ ТОГО ЖЕ списка встреч, что показан выше.
   // Иначе получалось: в таблице 4 подсвеченных строки, а в списке 2 —
@@ -376,8 +401,8 @@ function renderSideBySide(result, mineName, otherName, nowMin) {
     ]),
     el('div', { className: 'cmp-pairhead' }, [
       el('span', { className: 'cmp-pairhead-time', text: 'время' }),
-      el('span', { className: 'cmp-pairhead-name', text: shortName(mineName) }),
-      el('span', { className: 'cmp-pairhead-name', text: shortName(otherName) }),
+      el('span', { className: `cmp-pairhead-name${names.full ? ' is-full' : ''}`, text: names.mine }),
+      el('span', { className: `cmp-pairhead-name${names.full ? ' is-full' : ''}`, text: names.other }),
     ]),
     el('div', { className: 'cmp-pairtable' }, body),
     el('div', { className: 'cmp-legend' }, [

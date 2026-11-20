@@ -6,6 +6,8 @@
 //
 // Ключи localStorage вынесены сюда же: их читают и состояние, и выбор группы.
 
+import { clockNow } from './clock.js'
+
 export const SELECTED_GROUP_KEY = 'rasp_selected_group_v3'
 
 /** Вторая группа для сравнения расписаний — запоминается между заходами. */
@@ -39,7 +41,7 @@ export const state = {
   })(),
   /** День недели в сравнении групп: 0 — ещё не выбран, берём как в расписании. */
   compareDay: 0,
-  day: ((d) => (d === 0 || d === 6 ? 1 : d))(new Date().getDay()),
+  day: ((d) => (d === 0 || d === 6 ? 1 : d))(clockNow().getDay()),
   weekOffset: 0,
   prevGroupId: '',
   expandedHw: new Set(),

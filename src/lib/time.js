@@ -9,11 +9,11 @@ import { DAY_SWAP_MOTION, ROLE_RU } from './constants.js'
 import { motionOk } from './ui-feedback.js'
 import { getSession } from './store.js'
 import { DAY_NAMES } from '../data/seed.js'
+import { clockDateISO, clockMinutes, clockNow, clockOverrideLabel } from './clock.js'
 
-export function todayISO() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
+// Часы сайта (настоящие или подменённые через ?now=) живут в clock.js:
+// этот модуль импортирует state, поэтому держать там ещё и часы — значит
+// получить цикл. Здесь только реэкспорт, чтобы остальной код не менялся.
 
 /** «09:00» → минуты от полуночи */
 export function hhmmToMinutes(hhmm) {
@@ -23,8 +23,14 @@ export function hhmmToMinutes(hhmm) {
 }
 
 export function nowMinutesOfDay() {
-  const n = new Date()
-  return n.getHours() * 60 + n.getMinutes()
+  return clockMinutes()
+}
+
+export { clockNow, clockOverrideLabel }
+
+/** Сегодняшняя дата «2026-11-17» по часам сайта. */
+export function todayISO() {
+  return clockDateISO()
 }
 
 export function shortSubjectLabel(name, max = 36) {
@@ -45,7 +51,7 @@ export function humanMins(total) {
 
 /** Дата дня недели с учётом сдвига недель UI (0 = эта, -1 = прошлая, +1 = следующая). */
 export function dateForWeekday(dayNum, offset = state.weekOffset) {
-  const now = new Date()
+  const now = clockNow()
   const jsDay = now.getDay() || 7
   const d = new Date(now)
   d.setHours(12, 0, 0, 0)

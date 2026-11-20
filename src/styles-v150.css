@@ -847,6 +847,15 @@ html[data-theme='dark'] .cmp-days button.active .cmp-day-dot {
   opacity: 0.75;
 }
 
+/* Полное имя группы при совпадении коротких подписей («0901-ПД3» против
+   «0903-ПД3») должно читаться целиком, поэтому разрешаем перенос. */
+.cmp-pairhead-name.is-full {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
 .cmp-pairtable {
   display: flex;
   flex-direction: column;
@@ -1210,4 +1219,42 @@ html[data-theme='dark'] .cmp-days button.active .cmp-day-dot {
 /* В режиме «целиком» ползунок масштаба не нужен — он отключён. */
 .avatar-crop-zoom:disabled {
   opacity: 0.45;
+}
+
+/* Плашка «часы сайта переведены»: видна только при ?now= в адресе. */
+.clock-override-note {
+  position: sticky;
+  top: 0;
+  z-index: 90;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  font: 500 13px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #7c2d12;
+  background: #ffedd5;
+  border-bottom: 1px solid #fdba74;
+}
+.clock-override-note strong { font-weight: 700; }
+.clock-override-note button {
+  padding: 4px 10px;
+  font: inherit;
+  font-weight: 600;
+  color: #7c2d12;
+  background: #fff;
+  border: 1px solid #fdba74;
+  border-radius: 999px;
+  cursor: pointer;
+}
+html[data-theme='dark'] .clock-override-note {
+  color: #fed7aa;
+  background: #3a2416;
+  border-bottom-color: #7c4a22;
+}
+html[data-theme='dark'] .clock-override-note button {
+  color: #fed7aa;
+  background: #2a1a10;
+  border-color: #7c4a22;
 }

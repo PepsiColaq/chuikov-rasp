@@ -336,5 +336,51 @@ console.log('\n── 4. Обводка «сейчас» ──')
   uniq.slice(0, 5).forEach((e) => console.log('   ' + e.split('\n')[0]))
 }
 
+// Сценарий 5: имена колонок и согласованность карточки «Сейчас» с таблицей.
+//
+// Баг со скриншота: 0901-ПД3 и 0903-ПД3 после срезания года давали одинаковое
+// «ПД3» — экран выглядел как сравнение группы с самой собой. Второй баг:
+// карточка говорила «Свободен», а таблица в тот же момент — «Занятия закончились».
+console.log('\n── 5. Колонки различимы и не противоречат друг другу ──')
+{
+  // Пятница, 17:00: у 0901-ПД3 ещё идёт химия, у 0903-ПД3 занятия кончились в 13:00.
+  const now = new Date('2026-11-20T17:00:00+03:00')
+  const app = boot({
+    session: { role: 'admin', token: 't-admin3', label: 'Никита', expiresAt: now.getTime() + 1e9 },
+    compareGroup: 'g_0903_пд3',
+    freezeAt: now.getTime(),
+  })
+  const { w, errors } = app
+  await tick(1800)
+  const doc = w.document
+
+  // Своя группа — 0901-ПД3, сравниваем с 0903-ПД3: короткие подписи совпадают.
+  await findBtn(doc, /профиль/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(300)
+  await findBtn(doc, /сравнить с группой/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(500)
+
+  const heads = [...doc.querySelectorAll('#app .cmp-pairhead-name')].map((n) => (n.textContent || '').trim())
+  check(heads.length === 2, `в таблице две колонки (${heads.length})`)
+  check(heads[0] !== heads[1], `колонки различимы: «${heads[0]}» и «${heads[1]}»`)
+
+  // Та же минута: карточка «Сейчас» и строка таблицы должны говорить одно.
+  const nowCard = doc.querySelector('#app .cmp-now')
+  if (nowCard) {
+    const cardText = (nowCard.textContent || '').replace(/\s+/g, ' ')
+    const liveRow = doc.querySelector('#app .cmp-pairrow.is-now')
+    const rowGone = !!liveRow?.querySelector('.cmp-pairrow-sub.is-done')
+    const cardGone = /закончились/i.test(cardText)
+    check(
+      !rowGone || cardGone,
+      `если в таблице «закончились», карточка «Сейчас» тоже это говорит (таблица: ${rowGone}, карточка: ${cardGone})`,
+    )
+    check(!(rowGone && /Свободен/.test(cardText)), 'карточка не зовёт «Свободен» того, кто уже ушёл')
+  }
+
+  const uniq = [...new Set(errors)]
+  check(uniq.length === 0, uniq.length ? `ошибок: ${uniq.length}` : 'ошибок в консоли нет')
+}
+
 console.log(failed ? `\n❌ ПРОВАЛЕНО: ${failed}` : '\n✅ ДОСТУП К СРАВНЕНИЮ РАБОТАЕТ ПРАВИЛЬНО')
 process.exit(failed ? 1 : 0)
