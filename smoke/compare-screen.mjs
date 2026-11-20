@@ -26,7 +26,7 @@ const bad = (m) => {
 const check = (cond, m) => (cond ? ok(m) : bad(m))
 
 /** Поднимает приложение с заданной сессией в localStorage. */
-function boot({ session = null, compareGroup = null } = {}) {
+function boot({ session = null, compareGroup = null, freezeAt = null } = {}) {
   const errors = []
   const dom = new JSDOM(html, {
     url: 'https://example.test/chuikov-rasp/',
@@ -51,6 +51,21 @@ function boot({ session = null, compareGroup = null } = {}) {
   w.console.error = (...a) => errors.push(a.map(String).join(' '))
   w.console.warn = () => {}
   w.console.log = () => {}
+
+  // Заморозка часов: сценарий «сейчас» иначе зависел бы от времени запуска.
+  if (freezeAt != null) {
+    const RealDate = w.Date
+    class FrozenDate extends RealDate {
+      constructor(...args) {
+        if (args.length === 0) super(freezeAt)
+        else super(...args)
+      }
+      static now() {
+        return freezeAt
+      }
+    }
+    w.Date = FrozenDate
+  }
 
   w.localStorage.setItem('rasp_selected_group_v3', 'g_0901_пд3')
   w.localStorage.removeItem('rasp_compare_group_v1')
@@ -122,7 +137,12 @@ console.log('── 1. Админ: право есть по умолчанию �
   check(tableRows.length > 0, `таблица «расписание рядом» построена: ${tableRows.length} строк`)
   const tableText = tableRows.map((r) => r.textContent || '').join(' ')
   check(/каб\.\s*\d/.test(tableText), 'в таблице видны номера кабинетов')
-  check(!/на паре/i.test(tableText), 'нет бесполезного «на паре» — вместо него предмет и кабинет')
+  // Раньше эта проверка ловила любую «на паре» — и правильно: колонка
+  // показывала бесполезное «на паре» вместо предмета. Теперь фраза
+  // допустима только в метке «сейчас на паре», поэтому убираем её
+  // из текста и смотрим, что осталось.
+  const withoutLive = tableText.replace(/сейчас на паре/g, '')
+  check(!/на паре/i.test(withoutLive), 'нет бесполезного «на паре» — вместо него предмет и кабинет')
 
   // Подсветка в таблице обязана совпадать со списком встреч
   const listCount = doc.querySelectorAll('#app .cmp-meet').length
@@ -233,6 +253,87 @@ console.log('\n── 3. Тот же староста С правом ──')
 
   const uniq = [...new Set(errors)]
   check(uniq.length === 0, uniq.length ? `ошибок: ${uniq.length}` : 'ошибок в консоли нет')
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Сценарий 4: обводка «сейчас».
+//
+// Часы замораживаются посреди учебного дня — иначе проверка зависела бы
+// от того, когда её запустили: в полночь обводить нечего.
+console.log('\n── 4. Обводка «сейчас» ──')
+{
+  const now = new Date('2026-11-17T11:35:00+03:00') // вторник, середина дня
+  const app = boot({
+    session: { role: 'admin', token: 't-admin2', label: 'Никитос', expiresAt: now.getTime() + 1e9 },
+    compareGroup: 'g_0903_пд1',
+    freezeAt: now.getTime(),
+  })
+  const { w, errors } = app
+  await tick(1800)
+  const doc = w.document
+  await findBtn(doc, /профиль/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(300)
+  await findBtn(doc, /сравнить с группой/i)?.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+  await tick(450)
+
+  // Открыт сегодняшний день? Если нет — переключаемся на него.
+  const dayBtns = [...doc.querySelectorAll('#app .cmp-days button')]
+  const todayBtn = dayBtns[1] // вторник
+  if (todayBtn && !todayBtn.classList.contains('active')) {
+    todayBtn.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+    await tick(400)
+  }
+
+  const liveRows = [...doc.querySelectorAll('#app .cmp-pairrow.is-now')]
+  check(liveRows.length > 0, `обведена строка, которая идёт сейчас (${liveRows.length})`)
+
+  if (liveRows.length) {
+    const t = liveRows[0].querySelector('.cmp-pairrow-time')?.textContent || ''
+    check(/^\d\d:\d\d–\d\d:\d\d$/.test(t), `у обведённой строки есть время (${t})`)
+    // 11:35 обязано попасть внутрь этого интервала
+    const [a, b] = t.split('–').map((x) => {
+      const [h, m] = x.split(':').map(Number)
+      return h * 60 + m
+    })
+    check(a <= 11 * 60 + 35 && 11 * 60 + 35 < b, `11:35 действительно внутри интервала ${t}`)
+
+    // Метки ставятся только тем группам, которые ещё в колледже. Если у
+    // группы занятия кончились, метки быть не должно — иначе рядом с
+    // «Занятия закончились» появилось бы «сейчас», то есть противоречие.
+    const liveMarks = [...liveRows[0].querySelectorAll('.cmp-pairrow-live')]
+    const goneCells = [...liveRows[0].querySelectorAll('.cmp-pairrow-sub.is-done')]
+    check(
+      liveMarks.length + goneCells.length === 2,
+      `у каждой колонки либо метка, либо «закончились» (меток ${liveMarks.length}, ушло ${goneCells.length})`,
+    )
+    check(liveMarks.length > 0, 'хотя бы у одной группы есть метка «сейчас»')
+    // Метка обязана стоять только там, где группа не ушла.
+    for (const cell of liveRows[0].querySelectorAll('.cmp-pairrow-cell')) {
+      const hasMark = !!cell.querySelector('.cmp-pairrow-live')
+      const hasGone = !!cell.querySelector('.cmp-pairrow-sub.is-done')
+      check(!(hasMark && hasGone), 'метка «сейчас» не соседствует с «Занятия закончились»')
+    }
+    const firstMark = liveMarks[0]?.textContent || ''
+    check(/сейчас/.test(firstMark), `метка говорит «сейчас»: «${firstMark}»`)
+  }
+
+  // Маркер на полоске дня
+  check(!!doc.querySelector('#app .cmp-bar-now'), 'на полоске дня есть маркер текущего времени')
+  check(/сейчас/i.test(doc.querySelector('#app .cmp-scale')?.textContent || ''), 'под полоской подписано «сейчас»')
+
+  // Обводка не должна появляться на чужом дне
+  const otherDay = dayBtns.find((b) => !b.classList.contains('active'))
+  if (otherDay) {
+    otherDay.dispatchEvent(new w.MouseEvent('click', { bubbles: true }))
+    await tick(400)
+    const stray = doc.querySelectorAll('#app .cmp-pairrow.is-now').length
+    check(stray === 0, `на другом дне обводки нет (${stray})`)
+    check(!doc.querySelector('#app .cmp-bar-now'), 'и маркера времени на другом дне нет')
+  }
+
+  const uniq = [...new Set(errors)]
+  check(uniq.length === 0, uniq.length ? `ошибок: ${uniq.length}` : 'ошибок в консоли нет')
+  uniq.slice(0, 5).forEach((e) => console.log('   ' + e.split('\n')[0]))
 }
 
 console.log(failed ? `\n❌ ПРОВАЛЕНО: ${failed}` : '\n✅ ДОСТУП К СРАВНЕНИЮ РАБОТАЕТ ПРАВИЛЬНО')

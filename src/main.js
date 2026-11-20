@@ -748,6 +748,30 @@ async function boot() {
     if (dateForWeekday(state.day) !== today) return
     softRebuildTabPane('schedule')
   }, 30000)
+
+  /**
+   * Обводка «сейчас» на экране сравнения должна переезжать сама.
+   *
+   * Без этого человек открывает сравнение в 11:29, а в 11:31 на экране
+   * всё ещё обведено прошлое окно — и он идёт не туда. Перерисовываем
+   * только когда экран реально открыт: на других вкладках это лишняя работа.
+   */
+  let lastCompareMinute = -1
+  setInterval(() => {
+    if (state.tab !== 'more' || state.moreScreen !== 'compare') return
+    const now = nowMinutesOfDay()
+    if (now === lastCompareMinute) return
+    lastCompareMinute = now
+    // Печатают в поиске группы — не выдёргиваем поле из-под пальца.
+    if (isEditingFormNow()) return
+    const scroll = window.scrollY || document.documentElement.scrollTop || 0
+    render()
+    try {
+      window.scrollTo(0, scroll)
+    } catch {
+      /* ignore */
+    }
+  }, 20000)
 }
 
 if (PULL_TO_REFRESH && typeof window !== 'undefined' && 'ontouchstart' in window) {
@@ -1078,7 +1102,7 @@ if ('serviceWorker' in navigator) {
     location.reload()
   })
   navigator.serviceWorker
-    .register(`${base}sw.js?v=166`, { scope: base })
+    .register(`${base}sw.js?v=167`, { scope: base })
     .then((reg) => {
       reg.update().catch(() => {})
       // Сбросить флаг после успешной загрузки нового билда

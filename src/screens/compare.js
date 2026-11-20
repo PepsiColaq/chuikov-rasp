@@ -174,7 +174,18 @@ function renderNowForToday(result, mineName, otherName, dateStr) {
 
   let headline
   let sub = ''
-  if (current && current.kind === 'break' && current.end - now >= MIN_NOW_BREAK) {
+  // У кого-то занятия уже закончились — значит он не «свободен в колледже»,
+  // а ушёл. Раньше карточка этого не видела и предлагала «идите друг к другу»
+  // в тот момент, когда человек уже ехал домой.
+  const mineGone = !!current?.mineFinished
+  const otherGone = !!current?.otherFinished
+
+  if (current && (mineGone || otherGone) && current.kind === 'break') {
+    headline = mineGone && otherGone ? 'У обоих занятия закончились' : 'Занятия закончились не у всех'
+    sub = mineGone
+      ? `У тебя на сегодня всё, у ${otherName.replace(/^\d{4}-/, '')} ещё идут занятия.`
+      : `У ${otherName.replace(/^\d{4}-/, '')} на сегодня всё, у тебя ещё идут занятия.`
+  } else if (current && current.kind === 'break' && current.end - now >= MIN_NOW_BREAK) {
     headline = 'Вы оба свободны — можно идти друг к другу'
   } else if (current && current.kind === 'formation') {
     headline = 'Вы оба на построении'
@@ -215,7 +226,7 @@ export function comparisonText(result, mine, other, dayNumber, dateStr) {
 }
 
 /** Полоска дня: видно, где окна, а где пары. */
-function renderTimeline(result) {
+function renderTimeline(result, nowMin) {
   const span = result.dayEnd - result.dayStart
   if (span <= 0) return null
   const bar = el('div', { className: 'cmp-bar' })
@@ -230,10 +241,23 @@ function renderTimeline(result) {
       }),
     )
   }
+
+  // Где ты сейчас относительно дня: без этой чёрточки полоска показывает
+  // «какие окна есть», но не «где я». Приходилось сопоставлять время в уме.
+  const inDay = nowMin != null && nowMin >= result.dayStart && nowMin <= result.dayEnd
+  const marker = inDay
+    ? el('span', {
+        className: 'cmp-bar-now',
+        style: `left:${(((nowMin - result.dayStart) / span) * 100).toFixed(3)}%`,
+        'aria-label': 'сейчас',
+      })
+    : null
+
   return el('div', { className: 'cmp-timeline' }, [
-    bar,
+    el('div', { className: 'cmp-bar-wrap' }, [bar, marker]),
     el('div', { className: 'cmp-scale' }, [
       el('span', { text: minutesToHHMM(result.dayStart) }),
+      inDay ? el('span', { className: 'cmp-scale-now', text: `сейчас ${minutesToHHMM(nowMin)}` }) : null,
       el('span', { text: minutesToHHMM(result.dayEnd) }),
     ]),
   ])
@@ -254,20 +278,26 @@ function groupLine(detail) {
 }
 
 /** Строка встречи: «12:10–13:20 · перемена 70 мин». */
-function renderMeetingRow(m, index) {
+function renderMeetingRow(m, index, nowMin) {
   const time = `${minutesToHHMM(m.start)}–${minutesToHHMM(m.end)}`
   let sub
   if (m.kind === 'break') sub = `${MEETING_LABEL.break} · ${humanMins(m.minutes)}`
   else if (m.kind === 'formation') sub = `${MEETING_LABEL.formation} · ${humanMins(m.minutes)}`
   else sub = `${MEETING_LABEL.room} · каб. ${m.rooms.join('/')}`
 
-  return el('article', { className: `cmp-meet is-${m.kind}` }, [
+  // Идёт ли это окно в данную минуту — тогда помечаем, чтобы не искать
+  // в списке «а которое из них сейчас».
+  const live = nowMin != null && nowMin >= m.start && nowMin < m.end
+
+  return el('article', { className: `cmp-meet is-${m.kind}${live ? ' is-now' : ''}` }, [
     el('span', { className: 'cmp-meet-num', text: String(index + 1) }),
     el('div', { className: 'cmp-meet-main' }, [
       el('strong', { text: time }),
       el('span', { className: 'cmp-meet-sub', text: sub }),
     ]),
-    el('span', { className: 'cmp-meet-len', text: humanMins(m.minutes) }),
+    live
+      ? el('span', { className: 'cmp-meet-live', text: 'сейчас' })
+      : el('span', { className: 'cmp-meet-len', text: humanMins(m.minutes) }),
   ])
 }
 
@@ -275,7 +305,7 @@ function renderMeetingRow(m, index) {
  * Расписание рядом: две колонки с предметами и кабинетами.
  * Это главный блок экрана — по нему видно, где искать другого.
  */
-function renderSideBySide(result, mineName, otherName) {
+function renderSideBySide(result, mineName, otherName, nowMin) {
   const rows = scheduleRows(result)
   if (!rows.length) return null
 
@@ -287,9 +317,14 @@ function renderSideBySide(result, mineName, otherName) {
   const isMeeting = (seg) =>
     result.meetings.some((m) => m.start === seg.start && m.end === seg.end && m.kind === seg.kind)
 
+  // «Сейчас» вычисляется выше только для сегодняшнего дня. Если день другой,
+  // nowMin равен null и обводки не будет вовсе.
+  const isLive = (seg) => nowMin != null && nowMin >= seg.start && nowMin < seg.end
+
   const body = rows.map((seg) => {
     const time = `${minutesToHHMM(seg.start)}–${minutesToHHMM(seg.end)}`
     const meet = isMeeting(seg)
+    const live = isLive(seg)
 
     // Если у группы в этот момент занятия уже закончились — она не «свободна»,
     // она ушла. Иначе «свободен» в 17:00 выглядит как приглашение подождать.
@@ -298,25 +333,40 @@ function renderSideBySide(result, mineName, otherName) {
       return groupLine(detail)
     }
 
-    return el('div', { className: `cmp-pairrow${meet ? ' is-meet' : ''} is-${seg.kind}` }, [
-      el('span', { className: 'cmp-pairrow-time', text: time }),
-      el('span', { className: 'cmp-pairrow-cell' }, [
+    // У каждой колонки своя обводка: у меня и у второй группы пары разные,
+    // и подсвечивать обе одним цветом значило бы потерять главное различие.
+    //
+    // Метку не ставим группе, которая уже ушла: рядом с «Занятия закончились»
+    // слово «сейчас» читалось как противоречие.
+    const cell = (detail, finished, side) => {
+      const gone = finished && detail.state === 'free'
+      return el('span', { className: 'cmp-pairrow-cell' }, [
         el('span', {
-          className: `cmp-pairrow-sub${seg.mine.state === 'class' ? ' is-class' : ''}${
-            seg.mineFinished && seg.mine.state === 'free' ? ' is-done' : ''
+          className: `cmp-pairrow-sub${detail.state === 'class' ? ' is-class' : ''}${
+            gone ? ' is-done' : ''
           }`,
-          text: cellLine(seg.mine, seg.mineFinished),
+          text: cellLine(detail, finished),
         }),
-      ]),
-      el('span', { className: 'cmp-pairrow-cell' }, [
-        el('span', {
-          className: `cmp-pairrow-sub${seg.other.state === 'class' ? ' is-class' : ''}${
-            seg.otherFinished && seg.other.state === 'free' ? ' is-done' : ''
-          }`,
-          text: cellLine(seg.other, seg.otherFinished),
-        }),
-      ]),
-    ])
+        live && !gone
+          ? el('span', {
+              className: `cmp-pairrow-live is-${side}${detail.state === 'class' ? ' is-busy' : ''}`,
+              // «Свободен» и «сейчас» рядом читалось так, будто человек
+              // свободен именно в эту минуту, хотя у него идёт пара.
+              text: detail.state === 'class' ? 'сейчас на паре' : 'сейчас свободен',
+            })
+          : null,
+      ])
+    }
+
+    return el(
+      'div',
+      { className: `cmp-pairrow${meet ? ' is-meet' : ''}${live ? ' is-now' : ''} is-${seg.kind}` },
+      [
+        el('span', { className: 'cmp-pairrow-time', text: time }),
+        cell(seg.mine, seg.mineFinished, 'mine'),
+        cell(seg.other, seg.otherFinished, 'other'),
+      ],
+    )
   })
 
   return el('div', { className: 'card cmp-side' }, [
@@ -334,6 +384,7 @@ function renderSideBySide(result, mineName, otherName) {
       el('span', { className: 'cmp-legend-item is-break', text: 'перемена' }),
       el('span', { className: 'cmp-legend-item is-formation', text: 'построение' }),
       el('span', { className: 'cmp-legend-item is-room', text: 'один кабинет' }),
+      nowMin != null ? el('span', { className: 'cmp-legend-item is-now', text: 'сейчас' }) : null,
     ]),
   ])
 }
@@ -641,6 +692,10 @@ export function renderCompare() {
 
   // ── Итог
   const summary = summaryTitle(result, other.name)
+  // Текущее время имеет смысл только для сегодняшнего дня: если открыт
+  // понедельник, а сегодня среда, обводить «11:30» было бы враньём.
+  const nowMin = dateStr === todayISO() ? nowMinutesOfDay() : null
+
   panel.append(
     el('div', { className: `card cmp-summary is-${summary.tone}` }, [
       el('p', { className: 'cmp-summary-day', text: `${DAY_NAMES[day] || ''} · ${formatDateRu(dateStr)}` }),
@@ -651,7 +706,7 @@ export function renderCompare() {
       ]),
       summary.detail ? el('p', { className: 'cmp-summary-detail', text: summary.detail }) : null,
       summary.meta ? el('p', { className: 'cmp-summary-meta', text: summary.meta }) : null,
-      renderTimeline(result),
+      renderTimeline(result, nowMin),
     ]),
   )
 
@@ -674,14 +729,14 @@ export function renderCompare() {
         el(
           'div',
           { className: 'cmp-meet-list' },
-          result.meetings.map((m, i) => renderMeetingRow(m, i)),
+          result.meetings.map((m, i) => renderMeetingRow(m, i, nowMin)),
         ),
       ]),
     )
   }
 
   // ── Главное: расписание рядом с предметами и кабинетами
-  const side = renderSideBySide(result, mine.name, other.name)
+  const side = renderSideBySide(result, mine.name, other.name, nowMin)
   if (side) panel.append(side)
 
   // ── Отправить другу

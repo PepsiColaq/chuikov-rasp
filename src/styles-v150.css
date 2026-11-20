@@ -647,6 +647,10 @@ html[data-theme='dark'] .cmp-days button.active .cmp-day-dot {
   background: var(--warn);
 }
 
+/* «pair» — оба на парах, но в разных кабинетах. Именно этот класс
+   отдаёт classify(), поэтому он обязан быть в списке: без него два часа
+   дня выглядели дырой в полоске, хотя занятия шли. */
+.cmp-bar-seg.is-pair,
 .cmp-bar-seg.is-class,
 .cmp-bar-seg.is-home,
 .cmp-bar-seg.is-mixed {
@@ -906,6 +910,120 @@ html[data-theme='dark'] .cmp-days button.active .cmp-day-dot {
 .cmp-pairrow-sub.is-done {
   opacity: 0.5;
   font-style: italic;
+}
+
+/* ── «Сейчас»: что идёт прямо в эту минуту ─────────────────────────────
+   Раньше по экрану приходилось вручную сопоставлять время с часами.
+   Теперь текущий отрезок обведён, причём у каждой группы своим цветом:
+   пары у них разные, и один общий цвет стёр бы главное различие.
+
+   Обводка рисуется тенью, а не border: border сдвигал бы текст на 2px
+   и строки прыгали бы каждый раз при смене времени. */
+
+.cmp-pairrow.is-now .cmp-pairrow-time {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.cmp-pairrow-live {
+  display: block;
+  margin-top: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.5;
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmp-pairrow-live.is-mine {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.cmp-pairrow-live.is-other {
+  color: color-mix(in srgb, var(--warn) 80%, var(--ink));
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+/* «Сейчас на паре» важнее «сейчас свободен»: первое объясняет,
+   почему человек не может подойти, второе — приглашение подойти. */
+.cmp-pairrow-live.is-busy {
+  font-weight: 700;
+}
+
+.cmp-pairrow.is-now {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+/* Окно встречи, которое идёт сейчас, важнее простой очереди — усиливаем. */
+.cmp-pairrow.is-now.is-meet {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ok) 58%, transparent);
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+}
+
+/* Маркер текущего времени на полоске дня. */
+.cmp-bar-wrap {
+  position: relative;
+}
+
+.cmp-bar-now {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--ink);
+  box-shadow: 0 0 0 1.5px var(--surface);
+  pointer-events: none;
+}
+
+.cmp-scale-now {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+/* Строка встречи, которая идёт прямо сейчас. */
+.cmp-meet.is-now {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.cmp-meet-live {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+/* Метка «сейчас» в легендах — чёрточка, чтобы не путать с заливками. */
+.cmp-legend-item.is-now {
+  position: relative;
+  padding-left: 10px;
+}
+
+.cmp-legend-item.is-now::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 11px;
+  margin-top: -5.5px;
+  border-radius: 2px;
+  background: var(--ink);
 }
 
 @media (max-width: 380px) {
