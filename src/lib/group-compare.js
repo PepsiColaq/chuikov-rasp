@@ -211,6 +211,7 @@ export function compareDays({ mine, other, minBreak = MIN_BREAK_MINUTES } = {}) 
   const edges = [...points].sort((x, y) => x - y)
 
   const segments = []
+  let prevKey = ''
   for (let i = 0; i < edges.length - 1; i++) {
     const start = edges[i]
     const end = edges[i + 1]
@@ -228,13 +229,27 @@ export function compareDays({ mine, other, minBreak = MIN_BREAK_MINUTES } = {}) 
       sharedRooms.length > 0
     const kind = sameRoomPair ? 'room' : classify(mineDetail.state, otherDetail.state)
 
+    // Склеивать можно только те куски, у которых совпадает ВСЁ: тип,
+    // состояние и содержание обеих групп. Раньше сверялся один kind, и
+    // «построение + свободен» слипалось с «пара + свободен» (оба mixed):
+    // строка 13:05–14:30 подписывалась «Построение», хотя с 13:20 там пара.
+    const mineFinished = !!spanA && mid >= spanA.end
+    const otherFinished = !!spanB && mid >= spanB.end
+    const key = [
+      kind,
+      mineDetail.state, mineDetail.subject || '', mineDetail.room || '',
+      otherDetail.state, otherDetail.subject || '', otherDetail.room || '',
+      mineFinished ? 1 : 0, otherFinished ? 1 : 0,
+    ].join('|')
+
     const prev = segments[segments.length - 1]
-    if (prev && prev.kind === kind && prev.end === start) {
-      // Склеиваем соседние куски одного типа — иначе перемена 70 мин
+    if (prev && prevKey === key && prev.end === start) {
+      // Склеиваем соседние одинаковые куски — иначе перемена 70 мин
       // распалась бы на десяток строк между парами.
       prev.end = end
       continue
     }
+    prevKey = key
     segments.push({
       start,
       end,
@@ -245,8 +260,8 @@ export function compareDays({ mine, other, minBreak = MIN_BREAK_MINUTES } = {}) 
       mine: mineDetail,
       other: otherDetail,
       // «Занятия закончились» — своё расписание на этот момент уже кончилось.
-      mineFinished: !!spanA && mid >= spanA.end,
-      otherFinished: !!spanB && mid >= spanB.end,
+      mineFinished,
+      otherFinished,
       inside: insideBoth(mid),
     })
   }

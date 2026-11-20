@@ -165,6 +165,28 @@ check(diffRoom.counts.room === 0, 'разные кабинеты — общей 
 const empty = compareDays({ mine: { blocks: [] }, other: { blocks: [] } })
 check(empty.empty === true && empty.meetings.length === 0, 'нет пар ни у кого → пустой день, без падения')
 
+// ── 9б. Построение не съедает следующую пару
+//
+// Раньше соседние куски склеивались по одному только признаку «mixed»,
+// поэтому «построение + свободен» сливалось с «пара + свободен», и строка
+// 13:05–14:30 подписывалась «Построение» — пара «Русский язык» внутри неё
+// становилась невидимой.
+const fpViews = [{ start: '13:20', end: '14:30', subject: 'Русский язык', room: '413' }]
+const formationThenPair = compareDays({
+  mine: {
+    blocks: dayBlocks(
+      fpViews,
+      planFormation(fpViews, { faculties: ['ПД'], groupName: '0901-ПД3', lead: 15 }),
+    ),
+  },
+  other: { blocks: dayBlocks([], null) },
+})
+const fRow = formationThenPair.segments.find((s) => s.start === parseHHMM('13:05'))
+const pRow = formationThenPair.segments.find((s) => s.start === parseHHMM('13:20'))
+check(fRow?.kind === 'mixed' && fRow?.mine.state === 'formation', 'построение — отдельная строка')
+check(fRow?.end === parseHHMM('13:20'), `построение кончается в 13:20 (${fRow ? minutesToHHMM(fRow.end) : '—'})`)
+check(pRow?.mine.subject === 'Русский язык', `следующая строка — пара, а не «Построение» (${pRow?.mine.subject || '—'})`)
+
 // ── 10. Все пары всех групп: логика не падает и не врёт
 let worst = null
 let totalMeetings = 0
